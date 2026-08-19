@@ -31,6 +31,7 @@ let currentUser=null;
 let currentView='dashboard';
 let currentProjectId=null;
 let searchTerm='';
+let openPaymentGroups={};
 let syncTimer=null;
 let syncing=false;
 let pendingSync=false;
@@ -47,10 +48,12 @@ function loadCache(){try{return normalizeDB(JSON.parse(localStorage.getItem(APP_
 function cacheDB(){try{localStorage.setItem(APP_KEY,JSON.stringify(db));}catch(e){console.warn('Cache local indisponível',e)}}
 function saveDB(){cacheDB();queueRemoteSync();}
 function isAdmin(){return currentUser?.type==='Administrador';}
+function isComercial(){return currentUser?.type==='Comercial';}
+function canManageCore(){return isAdmin()||isComercial();}
 function findUser(id){return db.users.find(u=>u.id===id);}
 function findProject(id){return db.projects.find(p=>p.id===id);}
 function findClient(id){return db.clients.find(c=>c.id===id);}
-function canSeePlan(plan){return isAdmin()||plan.steps.some(s=>s.responsibleIds.includes(currentUser.id));}
+function canSeePlan(plan){return canManageCore()||plan.steps.some(s=>s.responsibleIds.includes(currentUser.id));}
 function canEditStep(step){return isAdmin()||step.responsibleIds.includes(currentUser.id);}
 
 const projectStatusToRemote=v=>['Planejamento','Em andamento','Pausado','Concluído','Cancelado'].includes(v)?v:'Planejamento';
@@ -128,25 +131,29 @@ function queueRemoteSync(){
 function showSyncError(e){console.error(e);alert(`Não foi possível salvar no Supabase: ${e.message}`);}
 async function upsertRows(table,rows){if(!rows.length)return;throwIfError(await sb.from(table).upsert(rows,{onConflict:'id'}),`Salvar ${table}`);}
 async function deleteMissing(table,ids,extraQuery){
-  if(!isAdmin())return;
+  if(!canManageCore())return;
   let q=sb.from(table).delete();
   if(extraQuery)q=extraQuery(q);
   if(ids.length)q=q.not('id','in',`(${ids.join(',')})`);else q=q.neq('id','00000000-0000-0000-0000-000000000000');
-  const r=await q;if(r.error)throw new Error(`Excluir registros antigos de ${table}: ${r.error.message}`);
+  const r=await q;
+  if(r.error){
+    if(table==='projetos'&&/foreign key|permission denied|row-level security/i.test(r.error.message))throw new Error('Não foi possível excluir um ou mais projetos: existem etapas financeiras vinculadas a eles. Peça a um administrador para excluir.');
+    throw new Error(`Excluir registros antigos de ${table}: ${r.error.message}`);
+  }
 }
 async function syncRemoteDB(){
   if(syncing){pendingSync=true;return;} syncing=true;
   try{
     if(isAdmin()){
       await upsertRows('profiles',db.users.map(u=>({id:u.id,nome:u.name||'',cpf:u.cpf||null,email:u.email||null,tipo:u.type,ativo:u.active!==false})));
+    }
+    if(canManageCore()){
       await upsertRows('clientes',db.clients.map(c=>({id:c.id,nome:c.name,estado:c.state,cidade:c.city||null,telefone:c.contact||null,created_by:currentUser.id})));
       await deleteMissing('clientes',db.clients.map(x=>x.id));
       await upsertRows('projetos',db.projects.map(p=>({id:p.id,cliente_id:p.clientId||null,nome:p.name,tipo_servico:p.type,responsavel:p.manager||null,status:projectStatusToRemote(p.status),data_inicio:p.start||null,prazo_final:p.deadline||null,valor_contrato:Number(p.contractValue||0),observacoes:p.notes||null,created_by:currentUser.id})));
       await deleteMissing('projetos',db.projects.map(x=>x.id));
       const projectStages=db.projects.flatMap(p=>p.stages.map((s,i)=>({id:s.id,projeto_id:p.id,titulo:s.name,descricao:s.owner||null,peso:Number(s.weight||0),progresso:Number(s.progress||0),prazo:s.deadline||null,status:projectStageStatusToRemote(s.status),ordem:i})));
       await upsertRows('etapas_projeto',projectStages);await deleteMissing('etapas_projeto',projectStages.map(x=>x.id));
-      await upsertRows('pagamentos',db.payments.map(x=>({id:x.id,projeto_id:x.projectId,nome_etapa:x.name,valor_previsto:Number(x.value||0),valor_recebido:Number(x.receivedValue||0),vencimento:x.dueDate||null,data_pagamento:x.paidAt||null,status:x.paid?'Pago':Number(x.receivedValue||0)>0?'Parcial':'Pendente'})));
-      await deleteMissing('pagamentos',db.payments.map(x=>x.id));
       await upsertRows('planos_trabalho',db.plans.map(p=>({id:p.id,projeto_id:p.projectId||null,titulo:p.title,status:planStatusToRemote(p.status),created_by:currentUser.id})));
       await deleteMissing('planos_trabalho',db.plans.map(x=>x.id));
       const steps=db.plans.flatMap(p=>p.steps.map((s,i)=>({id:s.id,plano_id:p.id,titulo:s.title,prazo:s.deadline||null,status:planStepStatusToRemote(s.status),observacoes:s.notes||null,ordem:i})));
@@ -159,7 +166,12 @@ async function syncRemoteDB(){
         if(resp.length){const r=await sb.from('etapa_responsaveis').insert(resp);if(r.error)throw r.error;}
       }
       await upsertRows('entregaveis',delivs);await deleteMissing('entregaveis',delivs.map(x=>x.id));
-    }else{
+    }
+    if(isAdmin()){
+      await upsertRows('pagamentos',db.payments.map(x=>({id:x.id,projeto_id:x.projectId,nome_etapa:x.name,valor_previsto:Number(x.value||0),valor_recebido:Number(x.receivedValue||0),vencimento:x.dueDate||null,data_pagamento:x.paidAt||null,status:x.paid?'Pago':Number(x.receivedValue||0)>0?'Parcial':'Pendente'})));
+      await deleteMissing('pagamentos',db.payments.map(x=>x.id));
+    }
+    if(!canManageCore()){
       const allowedSteps=db.plans.flatMap(p=>p.steps.filter(canEditStep));
       for(const step of allowedSteps){
         const r=await sb.from('etapas_plano').update({status:planStepStatusToRemote(step.status),observacoes:step.notes||null}).eq('id',step.id);
@@ -216,10 +228,12 @@ function renderLogin(initialError=''){
 }
 
 const ADMIN_NAV=[['dashboard','Visão geral'],['progress','Andamentos'],['clients','Clientes'],['projects','Projetos'],['payments','Financeiro'],['documents','Documentos'],['plans','Planos de trabalho'],['users','Usuários']];
-function navItems(){return isAdmin()?ADMIN_NAV:[['plans','Planos de trabalho']];}
+const COMERCIAL_NAV=[['clients','Clientes'],['projects','Projetos'],['plans','Planos de trabalho']];
+function navItems(){if(isAdmin())return ADMIN_NAV;if(isComercial())return COMERCIAL_NAV;return [['plans','Planos de trabalho']];}
 function renderApp(){
   matrixStop();
-  if(!isAdmin()&&currentView!=='plans')currentView='plans';
+  const allowedViews=navItems().map(([id])=>id);
+  if(!allowedViews.includes(currentView))currentView=allowedViews[0];
   $('#app').innerHTML=`<div class="shell"><aside class="sidebar">
     <div class="brand"><img src="logo-integral.png" alt="Integral"></div>
     <nav class="nav">${navItems().map(([id,label])=>`<button data-view="${id}" class="${currentView===id?'active':''}">${label}</button>`).join('')}</nav>
@@ -256,11 +270,17 @@ function renderDashboard(){
   });
   const maxOpen=Math.max(...months.map(m=>m.total),1);
   const sixMonthTotal=months.reduce((sum,m)=>sum+m.total,0);
+  const curMonthLabel=now.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const receivedThisMonth=db.payments.filter(x=>{
+    if(!x.paidAt)return false;
+    const paidAt=new Date(`${x.paidAt}T12:00:00`);
+    return paidAt.getFullYear()===now.getFullYear()&&paidAt.getMonth()===now.getMonth();
+  }).reduce((sum,x)=>sum+paymentReceived(x),0);
   $('#content').innerHTML=`<div class="grid cols-4">
     <div class="card metric"><h3>Clientes</h3><b>${db.clients.length}</b></div><div class="card metric"><h3>Projetos</h3><b>${db.projects.length}</b></div><div class="card metric"><h3>Planos de trabalho</h3><b>${db.plans.length}</b></div><div class="card metric"><h3>Etapas atrasadas</h3><b>${late}</b></div>
   </div>
   <section class="card receivables-card">
-    <div class="section-head"><div><h4>Valores em aberto para receber</h4><span class="muted">Próximos 6 meses, atualizados automaticamente conforme a data atual</span></div><div class="receivables-total"><span>Total previsto</span><strong>${money(sixMonthTotal)}</strong></div></div>
+    <div class="section-head"><div><h4>Valores em aberto para receber</h4><span class="muted">Próximos 6 meses, atualizados automaticamente conforme a data atual</span></div><div class="receivables-totals"><div class="receivables-total highlight"><span>Recebido em ${esc(curMonthLabel)}</span><strong>${money(receivedThisMonth)}</strong></div><div class="receivables-total"><span>Total previsto (6 meses)</span><strong>${money(sixMonthTotal)}</strong></div></div></div>
     <div class="receivables-grid">${months.map(m=>`<div class="receivable-month"><div class="receivable-head"><span>${esc(m.label)}</span><b>${money(m.total)}</b></div><div class="receivable-bar"><i style="width:${Math.round(m.total/maxOpen*100)}%"></i></div><small>${m.count} etapa(s) em aberto</small></div>`).join('')}</div>
   </section>
   <h3 class="section-title">Projetos por tipo</h3><div class="grid cols-3">${SERVICE_TYPES.map(t=>`<div class="card metric"><h3>${t}</h3><b>${db.projects.filter(p=>p.type===t).length}</b></div>`).join('')}</div>`;
@@ -296,6 +316,30 @@ function statusBadge(v){const x=String(v||'');const c=/Conclu|Recebido|Pago/i.te
 function paymentReceived(x){return Math.max(0,Math.min(Number(x.value||0),x.paid?Number(x.value||0):Number(x.receivedValue||0)))}
 function paymentBalance(x){return Math.max(0,Number(x.value||0)-paymentReceived(x))}
 function paymentStatus(x){return x.paid||paymentBalance(x)<=0&&Number(x.value||0)>0?'Pago':paymentReceived(x)>0?'Parcial':'Pendente'}
+function naturalCompare(a,b){
+  const re=/(\d+)|(\D+)/g;
+  const ax=String(a||'').match(re)||[],bx=String(b||'').match(re)||[];
+  while(ax.length&&bx.length){
+    const x=ax.shift(),y=bx.shift();
+    if(x!==y){const nx=Number(x),ny=Number(y);if(!isNaN(nx)&&!isNaN(ny))return nx-ny;return x<y?-1:1}
+  }
+  return ax.length-bx.length;
+}
+function sortPayments(arr){
+  return [...arr].sort((a,b)=>{
+    const da=a.dueDate||'',dbb=b.dueDate||'';
+    if(da&&dbb&&da!==dbb)return da<dbb?-1:1;
+    if(da&&!dbb)return -1;
+    if(!da&&dbb)return 1;
+    return naturalCompare(a.name,b.name);
+  });
+}
+function addMonthsClamped(y,m0,day,offset){
+  const total=m0+offset,targetY=y+Math.floor(total/12),targetM=((total%12)+12)%12;
+  const lastDay=new Date(targetY,targetM+1,0).getDate();
+  return new Date(targetY,targetM,Math.min(day,lastDay));
+}
+function toISODate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function renderProjects(){
   title(currentProjectId?'Detalhes do projeto':'Projetos');
   if(currentProjectId){renderProjectDetail();return;}
@@ -316,11 +360,15 @@ function renderProjectDetail(){
   <section class="card project-hero"><div><div class="project-kicker">${esc(p.type)}</div><h3>${esc(p.name)}</h3><p>${esc(p.notes||'Sem observações cadastradas.')}</p></div>${statusBadge(p.status)}</section>
   <div class="project-summary-grid"><div class="card summary-box"><span>Cliente</span><strong>${esc(findClient(p.clientId)?.name||'—')}</strong></div><div class="card summary-box"><span>Responsável</span><strong>${esc(p.manager||'—')}</strong></div><div class="card summary-box"><span>Prazo final</span><strong>${brDate(p.deadline)}</strong></div><div class="card summary-box"><span>Andamento</span><strong>${projectProgress(p)}%</strong><div class="progress"><i style="width:${projectProgress(p)}%"></i></div></div><div class="card summary-box"><span>Valor do contrato</span><strong>${money(p.contractValue)}</strong></div><div class="card summary-box"><span>Plano / documentos</span><strong>${plan?'1 plano':'Sem plano'} · ${docs.length} doc.</strong></div></div>
   <div class="project-columns"><section class="card"><div class="section-head"><div><h4>Etapas do projeto</h4><span class="muted">${p.stages.length} etapa(s)</span></div><button id="addProjectStage" class="btn icon secondary" title="Adicionar etapa">＋</button></div><div class="project-stage-list">${p.stages.map(s=>`<article class="project-stage"><div class="stage-main"><div><strong>${esc(s.name)}</strong><div class="meta-line"><span>${esc(s.owner||'Sem responsável')}</span><span>Prazo ${brDate(s.deadline)}</span><span>Peso ${Number(s.weight||0)}%</span></div></div>${statusBadge(s.status)}</div><div class="stage-progress-line"><div class="progress"><i style="width:${Math.max(0,Math.min(100,Number(s.progress||0)))}%"></i></div><b>${Number(s.progress||0)}%</b></div><div class="actions stage-buttons"><button class="btn icon secondary" data-edit-stage="${s.id}" title="Editar">✎</button><button class="btn icon danger" data-del-stage="${s.id}" title="Excluir">×</button></div></article>`).join('')||'<div class="empty compact">Nenhuma etapa cadastrada.</div>'}</div></section>
-  <section class="card"><div class="section-head"><div><h4>Resumo financeiro</h4><span class="muted">${pays.length} etapa(s) de pagamento</span></div><button id="addProjectPayment" class="btn icon secondary" title="Adicionar etapa de pagamento">＋</button></div><div class="finance-summary three"><div><span>Valor previsto</span><strong>${money(pays.reduce((a,b)=>a+Number(b.value||0),0))}</strong></div><div><span>Recebido</span><strong>${money(pays.reduce((a,b)=>a+paymentReceived(b),0))}</strong></div><div><span>Saldo</span><strong>${money(pays.reduce((a,b)=>a+paymentBalance(b),0))}</strong></div></div>${pays.slice(0,8).map(x=>`<div class="mini-payment detailed"><div><strong>${esc(x.name)}</strong><small>Vencimento ${brDate(x.dueDate)} · Recebido ${money(paymentReceived(x))}</small></div><div class="payment-mini-actions">${statusBadge(paymentStatus(x))}<button class="btn icon secondary" data-edit-project-pay="${x.id}" title="Registrar recebimento">✎</button></div></div>`).join('')||'<div class="empty compact">Nenhuma etapa de pagamento.</div>'}</section></div>
+  ${isAdmin()?`<section class="card"><div class="section-head"><div><h4>Resumo financeiro</h4><span class="muted">${pays.length} etapa(s) de pagamento</span></div><div class="actions"><button id="genProjectPayments" class="btn small secondary" title="Gerar parcelas">Gerar parcelas</button><button id="addProjectPayment" class="btn icon secondary" title="Adicionar etapa de pagamento">＋</button></div></div><div class="finance-summary three"><div><span>Valor previsto</span><strong>${money(pays.reduce((a,b)=>a+Number(b.value||0),0))}</strong></div><div><span>Recebido</span><strong>${money(pays.reduce((a,b)=>a+paymentReceived(b),0))}</strong></div><div><span>Saldo</span><strong>${money(pays.reduce((a,b)=>a+paymentBalance(b),0))}</strong></div></div>${sortPayments(pays).slice(0,8).map(x=>`<div class="mini-payment detailed"><div><strong>${esc(x.name)}</strong><small>Vencimento ${brDate(x.dueDate)} · Recebido ${money(paymentReceived(x))}</small></div><div class="payment-mini-actions">${statusBadge(paymentStatus(x))}<button class="btn icon secondary" data-edit-project-pay="${x.id}" title="Registrar recebimento">✎</button></div></div>`).join('')||'<div class="empty compact">Nenhuma etapa de pagamento.</div>'}</section>`:''}</div>
   <section class="card project-documents-card"><div class="section-head"><div><h4>Documentos do projeto</h4><span class="muted">${docs.length} arquivo(s) vinculado(s)</span></div></div><div class="project-document-list">${docs.map(d=>`<article class="project-document-item"><div class="document-icon">↧</div><div class="document-info"><strong>${esc(d.name)}</strong><span>${brDate(d.createdAt)}${d.size?` · ${Math.max(1,Math.round(d.size/1024))} KB`:''}</span></div><button class="btn small secondary" data-project-download-doc="${d.id}">Baixar</button></article>`).join('')||'<div class="empty compact">Nenhum documento vinculado a este projeto.</div>'}</div></section>`;
   $('#backProjects').onclick=()=>{currentProjectId=null;renderProjects()};
-  $('#editProjectDetail').onclick=()=>projectModal(p);$('#delProjectDetail').onclick=()=>deleteProject(p.id);$('#addProjectStage').onclick=()=>stageModal(p);$('#addProjectPayment').onclick=()=>paymentModal({projectId:p.id},renderProjectDetail);
-  $$('[data-edit-project-pay]').forEach(b=>b.onclick=()=>paymentModal(db.payments.find(x=>x.id===b.dataset.editProjectPay),renderProjectDetail));
+  $('#editProjectDetail').onclick=()=>projectModal(p);$('#delProjectDetail').onclick=()=>deleteProject(p.id);$('#addProjectStage').onclick=()=>stageModal(p);
+  if(isAdmin()){
+    $('#addProjectPayment').onclick=()=>paymentModal({projectId:p.id},renderProjectDetail);
+    $('#genProjectPayments').onclick=()=>installmentGeneratorModal(p.id,renderProjectDetail);
+    $$('[data-edit-project-pay]').forEach(b=>b.onclick=()=>paymentModal(db.payments.find(x=>x.id===b.dataset.editProjectPay),renderProjectDetail));
+  }
   $$('[data-edit-stage]').forEach(b=>b.onclick=()=>stageModal(p,p.stages.find(x=>x.id===b.dataset.editStage)));
   $$('[data-del-stage]').forEach(b=>b.onclick=()=>{if(confirm('Excluir etapa do projeto?')){p.stages=p.stages.filter(x=>x.id!==b.dataset.delStage);saveDB();renderProjectDetail()}});
   $$('[data-project-download-doc]').forEach(b=>b.onclick=async()=>{const d=db.documents.find(x=>x.id===b.dataset.projectDownloadDoc);if(!d)return;const {data,error}=await sb.storage.from('documentos').createSignedUrl(d.path,60);if(error){alert(`Não foi possível abrir o documento: ${error.message}`);return}window.open(data.signedUrl,'_blank','noopener')});
@@ -333,16 +381,52 @@ function stageModal(project,stage={}){
   openModal(stage.id?'Editar etapa':'Nova etapa',`<form id="stageForm" class="form-grid"><div class="field full"><label>Nome da etapa</label><input name="name" required value="${esc(stage.name||'')}"></div><div class="field"><label>Responsável</label><input name="owner" value="${esc(stage.owner||'')}"></div><div class="field"><label>Prazo</label><input type="date" name="deadline" value="${stage.deadline||''}"></div><div class="field"><label>Andamento (%)</label><input type="number" min="0" max="100" name="progress" value="${Number(stage.progress||0)}"></div><div class="field"><label>Peso no projeto (%)</label><input type="number" min="0" max="100" name="weight" value="${Number(stage.weight||0)}"></div><div class="field full"><label>Status</label><select name="status">${['Não iniciada','Em andamento','Concluída','Bloqueada'].map(s=>`<option ${stage.status===s?'selected':''}>${s}</option>`).join('')}</select></div></form>`,()=>$('#stageForm').requestSubmit());
   $('#stageForm').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));f.progress=Math.max(0,Math.min(100,Number(f.progress||0)));f.weight=Number(f.weight||0);if(stage.id)Object.assign(stage,f);else project.stages.push({id:uid(),...f});saveDB();closeModal();renderProjectDetail()};
 }
-function deleteProject(id){if(!confirm('Excluir este projeto e seus registros vinculados?'))return;db.projects=db.projects.filter(x=>x.id!==id);db.payments=db.payments.filter(x=>x.projectId!==id);db.documents=db.documents.filter(x=>x.projectId!==id);db.plans=db.plans.filter(x=>x.projectId!==id);saveDB();currentProjectId=null;renderProjects()}
+function deleteProject(id){
+  if(!isAdmin()&&db.payments.some(x=>x.projectId===id)){alert('Este projeto possui etapas financeiras cadastradas. Apenas um administrador pode excluí-lo.');return;}
+  if(!confirm('Excluir este projeto e seus registros vinculados?'))return;db.projects=db.projects.filter(x=>x.id!==id);db.payments=db.payments.filter(x=>x.projectId!==id);db.documents=db.documents.filter(x=>x.projectId!==id);db.plans=db.plans.filter(x=>x.projectId!==id);saveDB();currentProjectId=null;renderProjects()}
 
 function renderPayments(){
   title('Financeiro');
   const grouped={};db.payments.forEach(x=>(grouped[x.projectId]??=[]).push(x));
-  $('#content').innerHTML=`<div class="toolbar"><div></div><button id="newPayment" class="btn">Adicionar etapa de pagamento</button></div>${db.projects.map(p=>{const arr=grouped[p.id]||[];const expected=arr.reduce((a,b)=>a+Number(b.value||0),0),received=arr.reduce((a,b)=>a+paymentReceived(b),0);return `<div class="card" style="margin-bottom:14px"><div class="plan-head"><div><h3>${esc(p.name)}</h3><span class="muted">${arr.length} etapa(s) · Previsto ${money(expected)} · Recebido ${money(received)} · Saldo ${money(expected-received)}</span></div></div>${arr.length?`<div class="table-wrap"><table class="table payment-table"><thead><tr><th>Etapa</th><th>Previsto</th><th>Recebido</th><th>Saldo</th><th>Status</th><th>Vencimento</th><th></th></tr></thead><tbody>${arr.map(x=>`<tr><td>${esc(x.name)}<small class="project-sub">${Number(x.percent||0)?`${Number(x.percent)}% do contrato`:''}</small></td><td>${money(x.value)}</td><td>${money(paymentReceived(x))}</td><td>${money(paymentBalance(x))}</td><td>${statusBadge(paymentStatus(x))}${x.paidAt?`<small class="project-sub">${brDate(x.paidAt)}</small>`:''}</td><td>${brDate(x.dueDate)}</td><td class="actions">${!x.paid?`<button class="btn small secondary" data-pay-full="${x.id}" title="Marcar valor integral como pago">Marcar paga</button>`:''}<button class="btn icon secondary" data-edit-pay="${x.id}" title="Editar / registrar recebimento">✎</button><button class="btn icon danger" data-del-pay="${x.id}">×</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="muted">Nenhuma etapa de pagamento.</div>'}</div>`}).join('')||'<div class="empty">Cadastre um projeto primeiro.</div>'}`;
+  $('#content').innerHTML=`<div class="toolbar"><div></div><div class="right"><button id="genPayment" class="btn secondary">Gerar parcelas</button><button id="newPayment" class="btn">Adicionar etapa de pagamento</button></div></div>${db.projects.map(p=>{
+    const arr=sortPayments(grouped[p.id]||[]);
+    const expected=arr.reduce((a,b)=>a+Number(b.value||0),0),received=arr.reduce((a,b)=>a+paymentReceived(b),0);
+    const open=!!openPaymentGroups[p.id];
+    return `<div class="card payment-group ${open?'open':''}" style="margin-bottom:14px"><button type="button" class="payment-group-toggle" data-toggle-payment="${p.id}"><div><h3>${esc(p.name)}</h3><span class="muted">${arr.length} etapa(s) · Previsto ${money(expected)} · Recebido ${money(received)} · Saldo ${money(expected-received)}</span></div><span class="chevron">${open?'▲':'▼'}</span></button>${open?(arr.length?`<div class="table-wrap"><table class="table payment-table"><thead><tr><th>Etapa</th><th>Previsto</th><th>Recebido</th><th>Saldo</th><th>Status</th><th>Vencimento</th><th></th></tr></thead><tbody>${arr.map(x=>`<tr><td>${esc(x.name)}<small class="project-sub">${Number(x.percent||0)?`${Number(x.percent)}% do contrato`:''}</small></td><td>${money(x.value)}</td><td>${money(paymentReceived(x))}</td><td>${money(paymentBalance(x))}</td><td>${statusBadge(paymentStatus(x))}${x.paidAt?`<small class="project-sub">${brDate(x.paidAt)}</small>`:''}</td><td>${brDate(x.dueDate)}</td><td class="actions">${!x.paid?`<button class="btn small secondary" data-pay-full="${x.id}" title="Marcar valor integral como pago">Marcar paga</button>`:''}<button class="btn icon secondary" data-edit-pay="${x.id}" title="Editar / registrar recebimento">✎</button><button class="btn icon danger" data-del-pay="${x.id}">×</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="muted payment-group-empty">Nenhuma etapa de pagamento.</div>'):''}</div>`}).join('')||'<div class="empty">Cadastre um projeto primeiro.</div>'}`;
   $('#newPayment').onclick=()=>paymentModal();
+  $('#genPayment').onclick=()=>installmentGeneratorModal(null,renderPayments);
+  $$('[data-toggle-payment]').forEach(b=>b.onclick=()=>{const id=b.dataset.togglePayment;openPaymentGroups[id]=!openPaymentGroups[id];renderPayments()});
   $$('[data-edit-pay]').forEach(b=>b.onclick=()=>paymentModal(db.payments.find(x=>x.id===b.dataset.editPay)));
   $$('[data-pay-full]').forEach(b=>b.onclick=()=>{const x=db.payments.find(v=>v.id===b.dataset.payFull);if(!x)return;if(confirm(`Marcar a etapa “${x.name}” como totalmente paga?`)){x.receivedValue=Number(x.value||0);x.paid=true;x.paidAt=today();saveDB();renderPayments()}});
   $$('[data-del-pay]').forEach(b=>b.onclick=()=>{if(confirm('Excluir etapa?')){db.payments=db.payments.filter(x=>x.id!==b.dataset.delPay);saveDB();renderPayments()}})
+}
+function installmentGeneratorModal(projectId,afterSave){
+  const lockedProject=projectId?findProject(projectId):null;
+  openModal('Gerar parcelas',`<form id="genPayForm" class="form-grid">
+    <div class="field full"><label>Projeto</label>${lockedProject?`<input value="${esc(lockedProject.name)}" disabled><input type="hidden" name="projectId" value="${lockedProject.id}">`:`<select name="projectId" required><option value="">Selecione</option>${db.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>`}</div>
+    <div class="field full"><label>Nome base da etapa</label><input name="baseName" required value="Parcela"></div>
+    <div class="field"><label>Quantidade de parcelas</label><input name="count" type="number" min="1" max="360" step="1" required value="12"></div>
+    <div class="field"><label>Valor de cada parcela</label><input name="value" type="number" min="0" step="0.01" required></div>
+    <div class="field"><label>Vencimento da 1ª parcela</label><input name="firstDue" type="date" required value="${today()}"></div>
+    <div class="field"><label>Repetir a cada (meses)</label><input name="interval" type="number" min="1" max="12" step="1" value="1"></div>
+  </form>`,()=>$('#genPayForm').requestSubmit());
+  $('#genPayForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=Object.fromEntries(new FormData(e.target));
+    if(!f.projectId){alert('Selecione um projeto.');return}
+    const count=Math.max(1,Math.min(360,Math.round(Number(f.count||0))));
+    const value=Math.max(0,Number(f.value||0));
+    const interval=Math.max(1,Math.min(12,Math.round(Number(f.interval||1))));
+    const base=(f.baseName||'Parcela').trim()||'Parcela';
+    const [y,m,d]=f.firstDue.split('-').map(Number);
+    for(let i=0;i<count;i++){
+      const due=addMonthsClamped(y,m-1,d,i*interval);
+      db.payments.push({id:uid(),projectId:f.projectId,name:`${base} ${i+1}/${count}`,value,receivedValue:0,percent:0,dueDate:toISODate(due),paid:false,paidAt:'',createdAt:today()});
+    }
+    openPaymentGroups[f.projectId]=true;
+    saveDB();closeModal();
+    if(typeof afterSave==='function')afterSave();else renderPayments();
+  };
 }
 function paymentModal(x={},afterSave){
   const isPaid=!!x.paid||paymentStatus(x)==='Pago';
@@ -389,8 +473,8 @@ function documentModal(){
 function renderPlans(){
   title('Planos de trabalho');
   const plans=db.plans.filter(canSeePlan);
-  $('#content').innerHTML=`${isAdmin()?'<div class="toolbar"><div></div><button id="newPlan" class="btn">Criar plano de trabalho</button></div>':''}${plans.map(planCard).join('')||'<div class="empty">Nenhum plano de trabalho disponível para este usuário.</div>'}`;
-  if(isAdmin())$('#newPlan').onclick=()=>planModal();
+  $('#content').innerHTML=`${canManageCore()?'<div class="toolbar"><div></div><button id="newPlan" class="btn">Criar plano de trabalho</button></div>':''}${plans.map(planCard).join('')||'<div class="empty">Nenhum plano de trabalho disponível para este usuário.</div>'}`;
+  if(canManageCore())$('#newPlan').onclick=()=>planModal();
   $$('[data-edit-plan]').forEach(b=>b.onclick=()=>planModal(db.plans.find(x=>x.id===b.dataset.editPlan)));
   $$('[data-del-plan]').forEach(b=>b.onclick=()=>{if(confirm('Excluir plano?')){db.plans=db.plans.filter(x=>x.id!==b.dataset.delPlan);saveDB();renderPlans()}});
   $$('[data-add-step]').forEach(b=>b.onclick=()=>stepModal(db.plans.find(x=>x.id===b.dataset.addStep)));
@@ -400,8 +484,8 @@ function renderPlans(){
   $$('[data-step-notes]').forEach(t=>t.onchange=()=>updateStepField(t.dataset.plan,t.dataset.step,'notes',t.value));
   $$('[data-deliverable]').forEach(c=>c.onchange=()=>{const p=db.plans.find(x=>x.id===c.dataset.plan),s=p.steps.find(x=>x.id===c.dataset.step),d=s.deliverables.find(x=>x.id===c.dataset.deliverable);if(canEditStep(s)){d.done=c.checked;saveDB();renderPlans()}});
 }
-function planCard(p){const project=findProject(p.projectId);const total=p.steps.reduce((a,s)=>a+s.deliverables.length,0),done=p.steps.reduce((a,s)=>a+s.deliverables.filter(d=>d.done).length,0),pct=total?Math.round(done/total*100):0;return `<section class="card plan-card"><div class="plan-head"><div><h3>${esc(p.title)}</h3><div class="plan-meta"><span class="badge">${esc(project?.name||'Sem projeto')}</span><span class="badge ${p.status==='Concluído'?'ok':''}">${esc(p.status)}</span><span class="badge">${pct}% dos entregáveis</span></div></div>${isAdmin()?`<div class="actions"><button class="btn icon secondary" data-edit-plan="${p.id}" title="Editar plano">✎</button><button class="btn icon danger" data-del-plan="${p.id}" title="Excluir plano">×</button></div>`:''}</div><div class="progress"><i style="width:${pct}%"></i></div>${p.steps.length?p.steps.map(s=>stepCard(p,s)).join(''):'<div class="notice">Este plano ainda não possui etapas.</div>'}${isAdmin()?`<div style="margin-top:12px"><button class="btn small secondary" data-add-step="${p.id}">+ Adicionar etapa</button></div>`:''}</section>`}
-function stepCard(p,s){const editable=canEditStep(s);const names=s.responsibleIds.map(id=>findUser(id)?.name).filter(Boolean).join(', ')||'Sem responsáveis';const d=daysUntil(s.deadline);const deadlineBadge=s.deadline?(d<0&&s.status!=='Concluída'?'<span class="badge danger">Atrasada</span>':d<=7?'<span class="badge warn">Prazo próximo</span>':''):'';const pct=s.deliverables.length?Math.round(s.deliverables.filter(x=>x.done).length/s.deliverables.length*100):0;return `<div class="step ${editable?'':'readonly'}"><div class="step-top"><div><div class="step-title">${esc(s.title)} ${deadlineBadge}</div><span class="muted">${editable?'Você pode atualizar esta etapa':'Somente visualização'}</span></div>${isAdmin()?`<div class="actions"><button class="btn icon secondary" data-plan="${p.id}" data-edit-step="${s.id}">✎</button><button class="btn icon danger" data-plan="${p.id}" data-del-step="${s.id}">×</button></div>`:''}</div><div class="step-info"><div class="info-box"><b>Prazo</b>${brDate(s.deadline)}</div><div class="info-box"><b>Responsáveis</b>${esc(names)}</div><div class="info-box"><b>Progresso</b>${pct}%</div></div><div class="field"><label>Status</label>${editable?`<select data-step-status data-plan="${p.id}" data-step="${s.id}">${['Pendente','Em andamento','Aguardando','Concluída'].map(x=>`<option ${s.status===x?'selected':''}>${x}</option>`).join('')}</select>`:`<div class="badge">${esc(s.status)}</div>`}</div><div class="deliverables"><b>Entregáveis</b>${s.deliverables.length?s.deliverables.map(d=>`<label class="deliverable ${d.done?'done':''}"><input type="checkbox" data-deliverable="${d.id}" data-plan="${p.id}" data-step="${s.id}" ${d.done?'checked':''} ${editable?'':'disabled'}><span>${esc(d.text)}</span></label>`).join(''):'<div class="muted">Nenhum entregável cadastrado.</div>'}</div><div class="field"><label>Observações</label>${editable?`<textarea data-step-notes data-plan="${p.id}" data-step="${s.id}">${esc(s.notes)}</textarea>`:`<div class="info-box">${esc(s.notes||'Sem observações')}</div>`}</div></div>`}
+function planCard(p){const project=findProject(p.projectId);const total=p.steps.reduce((a,s)=>a+s.deliverables.length,0),done=p.steps.reduce((a,s)=>a+s.deliverables.filter(d=>d.done).length,0),pct=total?Math.round(done/total*100):0;return `<section class="card plan-card"><div class="plan-head"><div><h3>${esc(p.title)}</h3><div class="plan-meta"><span class="badge">${esc(project?.name||'Sem projeto')}</span><span class="badge ${p.status==='Concluído'?'ok':''}">${esc(p.status)}</span><span class="badge">${pct}% dos entregáveis</span></div></div>${canManageCore()?`<div class="actions"><button class="btn icon secondary" data-edit-plan="${p.id}" title="Editar plano">✎</button><button class="btn icon danger" data-del-plan="${p.id}" title="Excluir plano">×</button></div>`:''}</div><div class="progress"><i style="width:${pct}%"></i></div>${p.steps.length?p.steps.map(s=>stepCard(p,s)).join(''):'<div class="notice">Este plano ainda não possui etapas.</div>'}${canManageCore()?`<div style="margin-top:12px"><button class="btn small secondary" data-add-step="${p.id}">+ Adicionar etapa</button></div>`:''}</section>`}
+function stepCard(p,s){const editable=canEditStep(s);const names=s.responsibleIds.map(id=>findUser(id)?.name).filter(Boolean).join(', ')||'Sem responsáveis';const d=daysUntil(s.deadline);const deadlineBadge=s.deadline?(d<0&&s.status!=='Concluída'?'<span class="badge danger">Atrasada</span>':d<=7?'<span class="badge warn">Prazo próximo</span>':''):'';const pct=s.deliverables.length?Math.round(s.deliverables.filter(x=>x.done).length/s.deliverables.length*100):0;return `<div class="step ${editable?'':'readonly'}"><div class="step-top"><div><div class="step-title">${esc(s.title)} ${deadlineBadge}</div><span class="muted">${editable?'Você pode atualizar esta etapa':'Somente visualização'}</span></div>${canManageCore()?`<div class="actions"><button class="btn icon secondary" data-plan="${p.id}" data-edit-step="${s.id}">✎</button><button class="btn icon danger" data-plan="${p.id}" data-del-step="${s.id}">×</button></div>`:''}</div><div class="step-info"><div class="info-box"><b>Prazo</b>${brDate(s.deadline)}</div><div class="info-box"><b>Responsáveis</b>${esc(names)}</div><div class="info-box"><b>Progresso</b>${pct}%</div></div><div class="field"><label>Status</label>${editable?`<select data-step-status data-plan="${p.id}" data-step="${s.id}">${['Pendente','Em andamento','Aguardando','Concluída'].map(x=>`<option ${s.status===x?'selected':''}>${x}</option>`).join('')}</select>`:`<div class="badge">${esc(s.status)}</div>`}</div><div class="deliverables"><b>Entregáveis</b>${s.deliverables.length?s.deliverables.map(d=>`<label class="deliverable ${d.done?'done':''}"><input type="checkbox" data-deliverable="${d.id}" data-plan="${p.id}" data-step="${s.id}" ${d.done?'checked':''} ${editable?'':'disabled'}><span>${esc(d.text)}</span></label>`).join(''):'<div class="muted">Nenhum entregável cadastrado.</div>'}</div><div class="field"><label>Observações</label>${editable?`<textarea data-step-notes data-plan="${p.id}" data-step="${s.id}">${esc(s.notes)}</textarea>`:`<div class="info-box">${esc(s.notes||'Sem observações')}</div>`}</div></div>`}
 function updateStepField(pid,sid,key,val){const p=db.plans.find(x=>x.id===pid),s=p?.steps.find(x=>x.id===sid);if(s&&canEditStep(s)){s[key]=val;saveDB();renderPlans()}}
 function planModal(p={}){openModal(p.id?'Editar plano':'Novo plano de trabalho',`<form id="planForm" class="form-grid"><div class="field full"><label>Título</label><input name="title" required value="${esc(p.title||'')}"></div><div class="field"><label>Projeto</label><select name="projectId" required><option value="">Selecione</option>${db.projects.map(x=>`<option value="${x.id}" ${p.projectId===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label>Status</label><select name="status">${['Em andamento','Pausado','Concluído'].map(x=>`<option ${p.status===x?'selected':''}>${x}</option>`).join('')}</select></div></form>`,()=>$('#planForm').requestSubmit());$('#planForm').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));if(p.id)Object.assign(p,f);else db.plans.push({id:uid(),...f,createdAt:today(),steps:[]});saveDB();closeModal();renderPlans()}}
 function stepModal(plan,s={}){let deliverables=(s.deliverables||[]).map(d=>({...d}));openModal(s.id?'Editar etapa':'Nova etapa',`<form id="stepForm" class="form-grid"><div class="field full"><label>Nome da etapa</label><input name="title" required value="${esc(s.title||'')}"></div><div class="field"><label>Prazo</label><input name="deadline" type="date" value="${s.deadline||''}"></div><div class="field"><label>Status</label><select name="status">${['Pendente','Em andamento','Aguardando','Concluída'].map(x=>`<option ${s.status===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="field full"><label>Responsáveis (selecione um ou mais)</label><div class="check-grid">${db.users.filter(u=>u.active&&u.type!=='Administrador').map(u=>`<label class="check-item"><input type="checkbox" name="responsibleIds" value="${u.id}" ${(s.responsibleIds||[]).includes(u.id)?'checked':''}>${esc(u.name)} <span class="muted">(${esc(u.type)})</span></label>`).join('')||'<div class="notice">Cadastre usuários operacionais primeiro.</div>'}</div></div><div class="field full"><label>Entregáveis</label><div class="inline-add"><input id="newDeliverable" placeholder="Digite um entregável"><button id="addDeliverable" class="btn secondary" type="button">Adicionar</button></div><div id="deliverableTags" class="tag-list"></div></div><div class="field full"><label>Observações</label><textarea name="notes">${esc(s.notes||'')}</textarea></div></form>`,()=>$('#stepForm').requestSubmit());
