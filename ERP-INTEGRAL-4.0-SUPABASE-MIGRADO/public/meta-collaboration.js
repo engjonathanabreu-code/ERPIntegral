@@ -1,147 +1,173 @@
-/* ERP Integral - colaboração dentro do card de Meta */
+/* ERP Integral - colaboração robusta nas Metas + filtro de profissionais aptos */
 (() => {
 'use strict';
 
 const q=(s,r=document)=>r.querySelector(s);
-const qa=(s,r=document)=>[...r.querySelectorAll(s)];
+const qa=(s,r=document)=>Array.from(r.querySelectorAll(s));
 const B=()=>window.ERPIntegralBridge;
 const sb=()=>B()?.sb;
-const currentUser=()=>B()?.currentUser;
+const me=()=>B()?.currentUser;
 const esc=v=>B()?.esc?.(v)??String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>B()?.uid?.()??crypto.randomUUID();
 let lastMetaId=null;
+let scheduled=false;
 let enhancing=false;
 
-// Guarda a meta clicada antes do módulo principal abrir o modal.
-document.addEventListener('click',e=>{
-  const card=e.target.closest?.('[data-meta-card]');
-  if(card?.dataset.metaCard) lastMetaId=card.dataset.metaCard;
-},true);
-
+function norm(v=''){return String(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[-_]/g,' ').replace(/\s+/g,' ').trim()}
+function allowedProfessional(u){
+  const t=norm(u?.type||u?.role||'');
+  return t.includes('projet')||t.includes('topografia')||t.includes('pos protocolo');
+}
 function userName(id){return B()?.db?.users?.find(u=>u.id===id)?.name||'Usuário';}
 
-async function loadMetaAccess(metaId){
-  const client=sb(); if(!client)throw new Error('Supabase indisponível.');
+// Guarda com segurança qual meta foi clicada.
+document.addEventListener('click',e=>{
+  const card=e.target.closest?.('[data-meta-card]');
+  if(card?.dataset?.metaCard) lastMetaId=card.dataset.metaCard;
+},true);
+
+function filterProfessionalsInPage(){
+  // Cards de colaboradores da tela Metas.
+  qa('[data-meta-user]').forEach(card=>{
+    const id=card.dataset.metaUser;
+    const u=B()?.db?.users?.find(x=>x.id===id);
+    card.hidden=!!u&&!allowedProfessional(u);
+  });
+
+  // Formulário Nova/Editar Meta: deixa só os três setores profissionais solicitados.
+  const form=q('#metaV2Form');
+  if(form){
+    qa('input[name="responsavel"]',form).forEach(inp=>{
+      const u=B()?.db?.users?.find(x=>x.id===inp.value);
+      const row=inp.closest('.check-item')||inp.parentElement;
+      if(row) row.hidden=!!u&&!allowedProfessional(u);
+      if(u&&!allowedProfessional(u)) inp.checked=false;
+    });
+    const assoc=q('#metaAssocType',form);
+    if(assoc){
+      qa('option',assoc).forEach(o=>{if(norm(o.textContent).includes('projeto do erp')||o.value==='projeto')o.remove()});
+      if(assoc.value==='projeto'){assoc.value='avulsa';assoc.dispatchEvent(new Event('change',{bubbles:true}))}
+    }
+  }
+}
+
+async function resolveMetaId(modal){
+  if(lastMetaId)return lastMetaId;
+  const title=q('.modal-head h3',modal)?.textContent?.trim();
+  if(!title||!sb())return null;
+  const r=await sb().from('metas').select('id').eq('titulo',title).limit(1);
+  if(r.error)return null;
+  return r.data?.[0]?.id||null;
+}
+
+async function loadAccess(metaId){
+  const client=sb();
   const [m,r]=await Promise.all([
-    client.from('metas').select('id,titulo,created_by').eq('id',metaId).maybeSingle(),
+    client.from('metas').select('id,titulo,created_by,associacao_tipo,associacao_id').eq('id',metaId).maybeSingle(),
     client.from('meta_responsaveis').select('usuario_id').eq('meta_id',metaId)
   ]);
   if(m.error)throw m.error;if(r.error)throw r.error;
-  const meta=m.data;if(!meta)throw new Error('Meta não encontrada.');
-  const me=currentUser()?.id;
-  const responsibleIds=(r.data||[]).map(x=>x.usuario_id);
-  return {meta,responsibleIds,canCollaborate:meta.created_by===me||responsibleIds.includes(me)};
+  const ids=(r.data||[]).map(x=>x.usuario_id);
+  const admin=norm(me()?.type||me()?.role).includes('administrador')||norm(me()?.type||me()?.role).includes('diretor');
+  return {meta:m.data,responsibleIds:ids,can:admin||m.data?.created_by===me()?.id||ids.includes(me()?.id)};
 }
 
-async function addHistory(metaId,acao,descricao){
-  const client=sb();if(!client)return;
-  const meta=(await client.from('metas').select('titulo,associacao_tipo,associacao_id').eq('id',metaId).maybeSingle()).data;
-  if(!meta)return;
-  let entities=[];
-  if(meta.associacao_tipo==='avulsa'){
-    const rr=await client.from('meta_responsaveis').select('usuario_id').eq('meta_id',metaId);
-    entities=(rr.data||[]).map(x=>({entidade_tipo:'colaborador',entidade_id:x.usuario_id}));
-  }else entities=[{entidade_tipo:meta.associacao_tipo||'avulsa',entidade_id:meta.associacao_id||null}];
-  if(!entities.length)entities=[{entidade_tipo:'avulsa',entidade_id:null}];
-  const rows=entities.map(ent=>({id:uid(),meta_id:metaId,meta_titulo:meta.titulo,acao,descricao,autor_id:currentUser()?.id||null,...ent}));
-  const x=await client.from('meta_historico').insert(rows);if(x.error)console.warn('Histórico da meta:',x.error);
-}
+function missingTable(err){return /does not exist|Could not find the table|schema cache|42P01|PGRST205/i.test(err?.message||'')}
 
-function missingTable(err){return /does not exist|Could not find the table|42P01/i.test(err?.message||'');}
-
-async function loadCollab(metaId){
+async function loadData(metaId){
   const client=sb();
-  const [ck,cm]=await Promise.all([
+  const [c,m]=await Promise.all([
     client.from('meta_checklist').select('*').eq('meta_id',metaId).order('created_at'),
     client.from('meta_comentarios').select('*').eq('meta_id',metaId).order('created_at')
   ]);
-  const err=ck.error||cm.error;if(err)throw err;
-  return {checklist:ck.data||[],comments:cm.data||[]};
+  if(c.error)throw c.error;if(m.error)throw m.error;
+  return {checklist:c.data||[],comments:m.data||[]};
 }
 
-function ensureStyles(){
+async function addHistory(access,acao,descricao){
+  if(!access?.meta||!sb())return;
+  const meta=access.meta;
+  let entities=[];
+  if(meta.associacao_tipo==='avulsa')entities=access.responsibleIds.map(id=>({entidade_tipo:'colaborador',entidade_id:id}));
+  else entities=[{entidade_tipo:meta.associacao_tipo||'avulsa',entidade_id:meta.associacao_id||null}];
+  if(!entities.length)entities=[{entidade_tipo:'avulsa',entidade_id:null}];
+  await sb().from('meta_historico').insert(entities.map(x=>({id:uid(),meta_id:meta.id,meta_titulo:meta.titulo,acao,descricao,autor_id:me()?.id||null,...x})));
+}
+
+function injectStyles(){
   if(q('#metaCollabStyles'))return;
   const s=document.createElement('style');s.id='metaCollabStyles';s.textContent=`
-  .meta-checklist-list,.meta-comments-list{display:grid;gap:8px}.meta-check-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line,#d9e4e2);padding:10px 12px;border-radius:10px;background:#fff}.meta-check-item.done .meta-check-text{text-decoration:line-through;opacity:.62}.meta-check-item input{width:18px;height:18px;flex:0 0 auto}.meta-check-text{flex:1;min-width:0}.meta-check-meta{font-size:11px;color:var(--muted,#70807e)}.meta-collab-add{display:flex;gap:8px;margin-top:12px}.meta-collab-add input,.meta-collab-add textarea{flex:1;min-width:0}.meta-comment-item{border-left:3px solid #7bbdb6;background:#f8fbfb;border-radius:0 10px 10px 0;padding:10px 12px}.meta-comment-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px}.meta-comment-item p{margin:0;white-space:pre-wrap}.meta-collab-notice{padding:12px;border-radius:10px;background:#fff4d9;color:#79521a}.meta-check-delete{border:0;background:transparent;cursor:pointer;font-size:18px;opacity:.55}.meta-check-delete:hover{opacity:1}@media(max-width:680px){.meta-collab-add{flex-direction:column}.meta-comment-head{flex-direction:column;gap:2px}}
+  .meta-checklist-list,.meta-comments-list{display:grid;gap:8px}.meta-check-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line,#d9e4e2);padding:10px 12px;border-radius:10px;background:#fff}.meta-check-item.done .meta-check-text{text-decoration:line-through;opacity:.62}.meta-check-item input{width:18px;height:18px}.meta-check-text{flex:1;min-width:0}.meta-check-meta{font-size:11px;color:var(--muted,#70807e)}.meta-collab-add{display:flex;gap:8px;margin-top:12px}.meta-collab-add input,.meta-collab-add textarea{flex:1;min-width:0}.meta-comment-item{border-left:3px solid #7bbdb6;background:#f8fbfb;border-radius:0 10px 10px 0;padding:10px 12px}.meta-comment-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px}.meta-comment-item p{margin:0;white-space:pre-wrap}.meta-collab-notice{padding:12px;border-radius:10px;background:#fff4d9;color:#79521a}.meta-check-delete{border:0;background:transparent;cursor:pointer;font-size:18px;opacity:.6}.meta-check-delete:hover{opacity:1}@media(max-width:680px){.meta-collab-add{flex-direction:column}.meta-comment-head{flex-direction:column;gap:2px}}
   `;document.head.appendChild(s);
 }
 
-function tabButton(name,label,count){return `<button class="metas-tab" data-v2tab="${name}">${label} (${count})</button>`;}
+function wireTabs(modal){
+  qa('[data-v2tab]',modal).forEach(t=>{
+    t.onclick=()=>{
+      qa('[data-v2tab]',modal).forEach(x=>x.classList.remove('active'));t.classList.add('active');
+      qa('[data-v2panel]',modal).forEach(p=>p.classList.toggle('hidden',p.dataset.v2panel!==t.dataset.v2tab));
+    };
+  });
+}
 
-async function enhanceMetaModal(modal,metaId){
-  if(enhancing||!modal||modal.dataset.collabEnhanced==='1')return;
+function panelAnchor(modal){return q('.meta-admin-actions',modal)||q('.modal-foot',modal)||q('.metas-tabs',modal)?.nextElementSibling}
+
+function renderChecklist(panel,metaId,items,access){
+  panel.innerHTML=`<div class="meta-checklist-list">${items.length?items.map(x=>`<div class="meta-check-item ${x.concluido?'done':''}" data-check-id="${x.id}"><input type="checkbox" ${x.concluido?'checked':''} ${access.can?'':'disabled'}><div class="meta-check-text"><strong>${esc(x.titulo)}</strong>${x.concluido?`<div class="meta-check-meta">Concluído por ${esc(userName(x.concluido_por))}</div>`:''}</div>${access.can?'<button type="button" class="meta-check-delete" title="Excluir">×</button>':''}</div>`).join(''):'<div class="empty compact">Nenhum item no checklist.</div>'}</div>${access.can?'<div class="meta-collab-add"><input id="newMetaChecklistItem" placeholder="Novo item do checklist"><button type="button" class="btn secondary" id="addMetaChecklistItem">Adicionar item</button></div>':'<div class="meta-collab-notice">Checklist disponível para responsáveis e para quem atribuiu a meta.</div>'}`;
+  if(!access.can)return;
+  qa('.meta-check-item',panel).forEach(row=>{
+    q('input',row).onchange=async e=>{const done=e.target.checked;const r=await sb().from('meta_checklist').update({concluido:done,concluido_por:done?me()?.id:null,concluido_em:done?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('id',row.dataset.checkId).select().single();if(r.error){alert(r.error.message);e.target.checked=!done;return}await addHistory(access,done?'Checklist concluído':'Checklist reaberto',r.data.titulo);await refresh(modalFrom(panel),metaId)};
+    q('.meta-check-delete',row)?.addEventListener('click',async()=>{if(!confirm('Excluir este item do checklist?'))return;const r=await sb().from('meta_checklist').delete().eq('id',row.dataset.checkId);if(r.error){alert(r.error.message);return}await addHistory(access,'Checklist removido','Item removido do checklist.');await refresh(modalFrom(panel),metaId)});
+  });
+  q('#addMetaChecklistItem',panel).onclick=async()=>{const inp=q('#newMetaChecklistItem',panel),titulo=inp.value.trim();if(!titulo)return;const r=await sb().from('meta_checklist').insert({id:uid(),meta_id:metaId,titulo,created_by:me()?.id}).select().single();if(r.error){alert(r.error.message);return}await addHistory(access,'Checklist adicionado',titulo);await refresh(modalFrom(panel),metaId)};
+}
+
+function renderComments(panel,metaId,items,access){
+  panel.innerHTML=`<div class="meta-comments-list">${items.length?items.map(c=>`<div class="meta-comment-item"><div class="meta-comment-head"><strong>${esc(userName(c.autor_id))}</strong><span class="muted">${new Date(c.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(c.texto)}</p></div>`).join(''):'<div class="empty compact">Nenhum comentário.</div>'}</div>${access.can?'<div class="meta-collab-add"><textarea id="newMetaComment" rows="3" placeholder="Escreva um comentário..."></textarea><button type="button" class="btn secondary" id="addMetaComment">Enviar comentário</button></div>':'<div class="meta-collab-notice">Comentários disponíveis para responsáveis e para quem atribuiu a meta.</div>'}`;
+  if(!access.can)return;
+  q('#addMetaComment',panel).onclick=async()=>{const t=q('#newMetaComment',panel).value.trim();if(!t)return;const r=await sb().from('meta_comentarios').insert({id:uid(),meta_id:metaId,autor_id:me()?.id,texto:t}).select().single();if(r.error){alert(r.error.message);return}await addHistory(access,'Comentário adicionado',t.length>120?t.slice(0,120)+'…':t);await refresh(modalFrom(panel),metaId)};
+}
+function modalFrom(el){return el.closest('.modal')}
+
+async function refresh(modal,metaId){
+  if(!modal)return;
+  qa('[data-v2tab="checklist"],[data-v2tab="comments"],[data-v2tab="collabsetup"]',modal).forEach(x=>x.remove());
+  qa('[data-v2panel="checklist"],[data-v2panel="comments"],[data-v2panel="collabsetup"]',modal).forEach(x=>x.remove());
+  modal.dataset.collabEnhanced='';
+  await enhance(modal,metaId);
+}
+
+async function enhance(modal,forcedMetaId=null){
+  if(enhancing||!modal||modal.dataset.collabEnhanced==='1'||!q('.metas-tabs',modal))return;
   enhancing=true;
   try{
-    const access=await loadMetaAccess(metaId);
+    const metaId=forcedMetaId||await resolveMetaId(modal);if(!metaId)return;
+    const access=await loadAccess(metaId);
     let data;
-    try{data=await loadCollab(metaId)}catch(e){
+    try{data=await loadData(metaId)}catch(e){
       if(missingTable(e)){
-        const tabs=q('.metas-tabs',modal);if(tabs){
-          tabs.insertAdjacentHTML('beforeend',tabButton('collabsetup','Checklist/Comentários',0));
-          const actions=q('.meta-admin-actions',modal);
-          const panel=document.createElement('div');panel.className='metas-tab-panel hidden';panel.dataset.v2panel='collabsetup';panel.innerHTML='<div class="meta-collab-notice">Checklist e comentários estão prontos no ERP, mas faltam as tabelas no Supabase. Execute <b>supabase/metas_checklist_comentarios.sql</b> uma vez.</div>';
-          (actions||tabs).before?.(panel);wireTabs(modal);
-        }
-        modal.dataset.collabEnhanced='1';return;
+        const tabs=q('.metas-tabs',modal);
+        tabs.insertAdjacentHTML('beforeend','<button class="metas-tab" data-v2tab="collabsetup">Checklist e Comentários</button>');
+        const p=document.createElement('div');p.className='metas-tab-panel hidden';p.dataset.v2panel='collabsetup';p.innerHTML='<div class="meta-collab-notice">Checklist e comentários já estão preparados, mas faltam as tabelas no Supabase. Execute o SQL <b>metas_checklist_comentarios.sql</b>.</div>';
+        const a=panelAnchor(modal);if(a?.parentNode)a.parentNode.insertBefore(p,a);else q('.modal-body',modal)?.appendChild(p);
+        wireTabs(modal);modal.dataset.collabEnhanced='1';return;
       }
       throw e;
     }
-    const tabs=q('.metas-tabs',modal);if(!tabs)return;
-    tabs.insertAdjacentHTML('beforeend',tabButton('checklist','Checklist',data.checklist.length)+tabButton('comments','Comentários',data.comments.length));
-    const actions=q('.meta-admin-actions',modal);
-    const checklistPanel=document.createElement('div');checklistPanel.className='metas-tab-panel hidden';checklistPanel.dataset.v2panel='checklist';
-    const commentsPanel=document.createElement('div');commentsPanel.className='metas-tab-panel hidden';commentsPanel.dataset.v2panel='comments';
-    const anchor=actions||tabs.nextElementSibling;
-    if(actions){actions.before(checklistPanel,commentsPanel)}else{modal.querySelector('.modal-body')?.append(checklistPanel,commentsPanel)}
-    renderChecklist(checklistPanel,metaId,data.checklist,access);
-    renderComments(commentsPanel,metaId,data.comments,access);
-    wireTabs(modal);
-    modal.dataset.collabEnhanced='1';
-  }catch(e){console.error('Colaboração da meta:',e)}finally{enhancing=false;}
+    const tabs=q('.metas-tabs',modal);
+    tabs.insertAdjacentHTML('beforeend',`<button class="metas-tab" data-v2tab="checklist">Checklist (${data.checklist.length})</button><button class="metas-tab" data-v2tab="comments">Comentários (${data.comments.length})</button>`);
+    const p1=document.createElement('div');p1.className='metas-tab-panel hidden';p1.dataset.v2panel='checklist';
+    const p2=document.createElement('div');p2.className='metas-tab-panel hidden';p2.dataset.v2panel='comments';
+    const a=panelAnchor(modal);if(a?.parentNode){a.parentNode.insertBefore(p1,a);a.parentNode.insertBefore(p2,a)}else q('.modal-body',modal)?.append(p1,p2);
+    renderChecklist(p1,metaId,data.checklist,access);renderComments(p2,metaId,data.comments,access);wireTabs(modal);modal.dataset.collabEnhanced='1';
+  }catch(e){console.error('Meta colaboração:',e)}finally{enhancing=false}
 }
 
-function wireTabs(modal){
-  qa('[data-v2tab]',modal).forEach(t=>t.onclick=()=>{
-    qa('[data-v2tab]',modal).forEach(x=>x.classList.remove('active'));t.classList.add('active');
-    qa('[data-v2panel]',modal).forEach(p=>p.classList.toggle('hidden',p.dataset.v2panel!==t.dataset.v2tab));
-  });
+function reconcile(){
+  scheduled=false;injectStyles();filterProfessionalsInPage();
+  const modal=q('#modal .modal');if(modal&&q('.metas-tabs',modal))enhance(modal);
 }
-
-function renderChecklist(panel,metaId,items,access){
-  const can=access.canCollaborate;
-  panel.innerHTML=`<div class="meta-checklist-list">${items.length?items.map(x=>`<div class="meta-check-item ${x.concluido?'done':''}" data-check-id="${x.id}"><input type="checkbox" ${x.concluido?'checked':''} ${can?'':'disabled'}><div class="meta-check-text"><strong>${esc(x.titulo)}</strong>${x.concluido?`<div class="meta-check-meta">Concluído por ${esc(userName(x.concluido_por))}</div>`:''}</div>${can?'<button type="button" class="meta-check-delete" title="Excluir item">×</button>':''}</div>`).join(''):'<div class="empty compact">Nenhum item no checklist.</div>'}</div>${can?'<div class="meta-collab-add"><input id="newMetaChecklistItem" placeholder="Novo item do checklist"><button type="button" class="btn secondary" id="addMetaChecklistItem">Adicionar</button></div>':'<div class="meta-collab-notice">Checklist disponível apenas para o responsável da meta e para quem a atribuiu.</div>'}`;
-  if(!can)return;
-  qa('.meta-check-item',panel).forEach(row=>{
-    q('input',row).onchange=async e=>{
-      const done=e.target.checked,payload={concluido:done,concluido_por:done?currentUser().id:null,concluido_em:done?new Date().toISOString():null,updated_at:new Date().toISOString()};
-      const r=await sb().from('meta_checklist').update(payload).eq('id',row.dataset.checkId).select().single();if(r.error){alert(r.error.message);e.target.checked=!done;return}await addHistory(metaId,done?'Checklist concluído':'Checklist reaberto',r.data.titulo);refreshCurrentModal(metaId);
-    };
-    q('.meta-check-delete',row)?.addEventListener('click',async()=>{if(!confirm('Excluir este item do checklist?'))return;const r=await sb().from('meta_checklist').delete().eq('id',row.dataset.checkId);if(r.error){alert(r.error.message);return}await addHistory(metaId,'Checklist removido','Item removido do checklist.');refreshCurrentModal(metaId);});
-  });
-  q('#addMetaChecklistItem',panel).onclick=async()=>{const inp=q('#newMetaChecklistItem',panel),titulo=inp.value.trim();if(!titulo)return;const r=await sb().from('meta_checklist').insert({id:uid(),meta_id:metaId,titulo,created_by:currentUser().id}).select().single();if(r.error){alert(r.error.message);return}await addHistory(metaId,'Checklist adicionado',titulo);refreshCurrentModal(metaId);};
-}
-
-function renderComments(panel,metaId,comments,access){
-  const can=access.canCollaborate;
-  panel.innerHTML=`<div class="meta-comments-list">${comments.length?comments.map(c=>`<div class="meta-comment-item"><div class="meta-comment-head"><strong>${esc(userName(c.autor_id))}</strong><span class="muted">${new Date(c.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(c.texto)}</p></div>`).join(''):'<div class="empty compact">Nenhum comentário.</div>'}</div>${can?'<div class="meta-collab-add"><textarea id="newMetaComment" rows="3" placeholder="Escreva um comentário..."></textarea><button type="button" class="btn secondary" id="addMetaComment">Enviar comentário</button></div>':'<div class="meta-collab-notice">Comentários disponíveis apenas para o responsável da meta e para quem a atribuiu.</div>'}`;
-  if(!can)return;
-  q('#addMetaComment',panel).onclick=async()=>{const txt=q('#newMetaComment',panel).value.trim();if(!txt)return;const r=await sb().from('meta_comentarios').insert({id:uid(),meta_id:metaId,autor_id:currentUser().id,texto:txt}).select().single();if(r.error){alert(r.error.message);return}await addHistory(metaId,'Comentário adicionado',txt.length>120?txt.slice(0,120)+'…':txt);refreshCurrentModal(metaId);};
-}
-
-function refreshCurrentModal(metaId){
-  const modal=qa('.modal-backdrop .modal').find(m=>q('.metas-tabs',m));if(!modal)return;
-  modal.dataset.collabEnhanced='0';
-  qa('[data-v2tab="checklist"],[data-v2tab="comments"],[data-v2tab="collabsetup"]',modal).forEach(x=>x.remove());
-  qa('[data-v2panel="checklist"],[data-v2panel="comments"],[data-v2panel="collabsetup"]',modal).forEach(x=>x.remove());
-  enhanceMetaModal(modal,metaId);
-}
-
-function scan(){
-  ensureStyles();
-  if(!lastMetaId)return;
-  const modal=qa('.modal-backdrop .modal').find(m=>q('.metas-tabs',m));
-  if(modal)enhanceMetaModal(modal,lastMetaId);
-}
-const observer=new MutationObserver(scan);observer.observe(document.documentElement,{childList:true,subtree:true});
-setTimeout(scan,0);
+function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(reconcile)}
+new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true});
+window.addEventListener('erp-bridge-ready',schedule);window.addEventListener('load',schedule);schedule();
 })();
