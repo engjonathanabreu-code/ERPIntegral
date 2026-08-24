@@ -63,7 +63,6 @@ async function refineMetaModal(){
   const responsibleWrap=[...form.querySelectorAll('.field.full')].find(x=>x.querySelector('label')?.textContent?.trim()==='Responsáveis');
   const grid=responsibleWrap?.querySelector('.check-grid');
   const labels=qsa('.check-item',grid||responsibleWrap||document);
-  const users=eligibleUsers();
 
   if(sectorSelect){
     const selectedId=sectorSelect.value;
@@ -116,6 +115,68 @@ function filterEmployeeCards(){
   });
 }
 
+function injectActiveGoalsStyles(){
+  if(qs('#metasActiveByEmployeeStyles'))return;
+  const s=document.createElement('style');
+  s.id='metasActiveByEmployeeStyles';
+  s.textContent=`
+    .metas-ativas-groups.hotfix-active-layout{display:flex!important;flex-direction:column!important;gap:16px!important}
+    .metas-ativas-groups.hotfix-active-layout>.metas-open-section{order:1;width:100%}
+    .metas-ativas-groups.hotfix-active-layout>.metas-sector-section{order:2;width:100%}
+    .metas-open-by-employee{display:grid;gap:18px;margin-top:14px}
+    .metas-open-employee-group{display:grid;gap:8px}
+    .metas-open-employee-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 2px}
+    .metas-open-employee-head strong{font-size:15px}
+    .metas-open-employee-list{display:grid!important;grid-template-columns:1fr!important;gap:10px!important}
+    .metas-open-employee-list .metas2-card{width:100%!important;max-width:none!important;min-width:0!important;text-align:left}
+    .metas-open-employee-list .metas2-card small{display:none}
+  `;
+  document.head.appendChild(s);
+}
+
+function arrangeActiveGoalsByEmployee(){
+  const root=qs('.metas-ativas-groups');
+  if(!root)return;
+  const sections=[...root.children].filter(x=>x.matches?.('section.card'));
+  const openSection=sections.find(s=>s.querySelector('h3')?.textContent?.trim()==='Metas em aberto');
+  const sectorSection=sections.find(s=>s.querySelector('h3')?.textContent?.trim()==='Setores');
+  if(!openSection||!sectorSection)return;
+
+  injectActiveGoalsStyles();
+  root.classList.add('hotfix-active-layout');
+  openSection.classList.add('metas-open-section');
+  sectorSection.classList.add('metas-sector-section');
+  if(root.firstElementChild!==openSection)root.insertBefore(openSection,sectorSection);
+
+  const existingGrouped=qs('.metas-open-by-employee',openSection);
+  const sourceGrid=qs('.metas2-card-grid',openSection);
+  if(existingGrouped||!sourceGrid)return;
+
+  const cards=qsa('.metas2-card',sourceGrid);
+  if(!cards.length)return;
+  const groups=new Map();
+  cards.forEach(card=>{
+    const responsible=(card.querySelector('small')?.textContent||'Sem responsável').trim()||'Sem responsável';
+    if(!groups.has(responsible))groups.set(responsible,[]);
+    groups.get(responsible).push(card);
+  });
+
+  const wrap=document.createElement('div');
+  wrap.className='metas-open-by-employee';
+  [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'pt-BR')).forEach(([name,items])=>{
+    const group=document.createElement('div');
+    group.className='metas-open-employee-group';
+    const head=document.createElement('div');
+    head.className='metas-open-employee-head';
+    head.innerHTML=`<strong>${esc(name)}</strong><span class="muted">${items.length} meta(s) em aberto</span>`;
+    const list=document.createElement('div');
+    list.className='metas-open-employee-list';
+    items.forEach(card=>list.appendChild(card));
+    group.append(head,list);wrap.appendChild(group);
+  });
+  sourceGrid.replaceWith(wrap);
+}
+
 function roleName(){return String(me()?.type||me()?.role||qs('.topbar .badge')?.textContent||qs('.user-mini')?.textContent||'').toLowerCase();}
 function canManageOS(){const r=roleName();return r.includes('administrador')||r.includes('diretor de projetos')||r.includes('pós-protocolo')||r.includes('pos-protocolo')||r.includes('pós protocolo')||r.includes('pos protocolo');}
 
@@ -150,7 +211,7 @@ function interceptOsButtons(){
   const detailEdit=qs('#osDetailEdit');if(detailEdit&&!detailEdit.dataset.hotfix8){detailEdit.dataset.hotfix8='1';detailEdit.addEventListener('click',async e=>{e.preventDefault();e.stopImmediatePropagation();const title=qs('.os-hero h3')?.textContent?.trim();let o=null;if(title){const r=await sb().from('ordens_servico').select('*').eq('nome',title).limit(1).maybeSingle();if(!r.error)o=r.data;}if(o)openOsModal(o);},{capture:true});}
 }
 
-async function reconcile(){await refineMetaModal();compactSectors();filterEmployeeCards();interceptOsButtons();}
+async function reconcile(){await refineMetaModal();compactSectors();filterEmployeeCards();arrangeActiveGoalsByEmployee();interceptOsButtons();}
 let scheduled=false;const obs=new MutationObserver(()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(async()=>{scheduled=false;await reconcile();});});obs.observe(document.documentElement,{childList:true,subtree:true});
 window.addEventListener('erp-bridge-ready',()=>syncMetaSectorsFromERP(true),{once:false});
 setTimeout(()=>syncMetaSectorsFromERP(true),800);
