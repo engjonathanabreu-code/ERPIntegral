@@ -1,6 +1,7 @@
 name: Upgrade ERP metas v2 once
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/upgrade-metas-v2-once.yml'
@@ -19,36 +20,21 @@ jobs:
           from pathlib import Path
           p=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js')
           s=p.read_text()
-
-          s=s.replace("const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];",
-                      "const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico','Diretor de Projetos'];",1)
-          s=s.replace("function isTechDirector(){return currentUser?.type==='Diretor Técnico';}",
-                      "function isTechDirector(){return ['Diretor Técnico','Diretor de Projetos'].includes(currentUser?.type);}",1)
-          s=s.replace("function isMetasManager(){return isAdmin()||isTechDirector();}",
-                      "function isMetasManager(){return isAdmin()||isTechDirector()||['Pós-protocolo','Pós Protocolo'].includes(currentUser?.type);}",1)
-
+          s=s.replace("const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];","const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico','Diretor de Projetos'];",1)
+          s=s.replace("function isTechDirector(){return currentUser?.type==='Diretor Técnico';}","function isTechDirector(){return ['Diretor Técnico','Diretor de Projetos'].includes(currentUser?.type);}",1)
+          s=s.replace("function isMetasManager(){return isAdmin()||isTechDirector();}","function isMetasManager(){return isAdmin()||isTechDirector()||['Pós-protocolo','Pós Protocolo'].includes(currentUser?.type);}",1)
           old="function renderView(){\n  const fn={dashboard:renderDashboard,progress:renderProgress,clients:renderClients,projects:renderProjects,payments:renderPayments,documents:renderDocuments,plans:renderPlans,metas:renderMetas,users:renderUsers}[currentView]||renderDashboard;fn();\n}"
           new="function renderView(){\n  if(currentView==='metas'&&window.ERPMetasV2?.render){window.ERPMetasV2.render();return;}\n  const fn={dashboard:renderDashboard,progress:renderProgress,clients:renderClients,projects:renderProjects,payments:renderPayments,documents:renderDocuments,plans:renderPlans,metas:renderMetas,users:renderUsers}[currentView]||renderDashboard;fn();\n}"
-          if old not in s: raise SystemExit('renderView block not found')
-          s=s.replace(old,new,1)
-
+          if old in s:s=s.replace(old,new,1)
           s=s.replace('<section class="card plan-card">','<section class="card plan-card" data-plan-card-id="${p.id}">',1)
-
           marker="window.addEventListener('error',e=>console.error('ERP Integral:',e.error||e.message));\ninit();"
           bridge="""window.ERPIntegralBridge={
-  get db(){return db},
-  get currentUser(){return currentUser},
-  get currentView(){return currentView},
-  set currentView(v){currentView=v},
-  get currentProjectId(){return currentProjectId},
-  set currentProjectId(v){currentProjectId=v},
-  sb,esc,uid,today,brDate,money,title,openModal,closeModal,findUser,findProject,findClient,cacheDB,saveDB,renderApp,renderView,
-  renderProjects,renderPlans,renderUsers,renderLegacyMetas:renderMetas
+  get db(){return db},get currentUser(){return currentUser},get currentView(){return currentView},set currentView(v){currentView=v},get currentProjectId(){return currentProjectId},set currentProjectId(v){currentProjectId=v},
+  sb,esc,uid,today,brDate,money,title,openModal,closeModal,findUser,findProject,findClient,cacheDB,saveDB,renderApp,renderView,renderProjects,renderPlans,renderUsers,renderLegacyMetas:renderMetas
 };
 window.addEventListener('error',e=>console.error('ERP Integral:',e.error||e.message));
 init();"""
-          if marker not in s: raise SystemExit('bottom marker not found')
-          s=s.replace(marker,bridge,1)
+          if marker in s:s=s.replace(marker,bridge,1)
           p.write_text(s)
           PY
       - name: Commit app patch
