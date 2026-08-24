@@ -22,3 +22,4 @@ jobs:
           git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
           git diff --cached --quiet || git commit -m "fix: restore ERP application source"
           git push
+# restore trigger 2
