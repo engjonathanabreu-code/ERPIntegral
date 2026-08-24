@@ -1,0 +1,24 @@
+name: Restore ERP app
+on:
+  push:
+    paths:
+      - '.github/workflows/restore-erp-app.yml'
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore stable app.js
+        run: |
+          git show f43e69e787a9315be2338fc8ca2f51298d3750ff:ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js > ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+      - name: Commit restored file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+          git diff --cached --quiet || git commit -m "fix: restore ERP application source"
+          git push
