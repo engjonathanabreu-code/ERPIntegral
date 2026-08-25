@@ -4,8 +4,8 @@
 const APP_KEY='erp_integral_v2_db';
 const SESSION_KEY='erp_integral_v2_session';
 const SERVICE_TYPES=['REURB PRIVADO','REURB LICITADO','ETSA','ETSA + ORTOFOTO','OUTROS'];
-const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];
-const USER_SECTORS=['Administrativo','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos'];
+const USER_TYPES=['Administrador','Comercial','Financeiro','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];
+const USER_SECTORS=['Administrativo','Comercial','Financeiro','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos'];
 const METAS_SECTORS=['Projetos','Topografia','Pós-protocolo','Atendimentos'];
 const PLAN_STATUS_COLUMNS=['Planejamento','Em andamento','Concluído','Cancelado'];
 const WEEKDAY_LABELS=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -44,6 +44,9 @@ let syncTimer=null;
 let syncing=false;
 let pendingSync=false;
 let remoteLoaded=false;
+const PROJECT_GROUPS_STORAGE='erp_integral_project_groups_collapsed';
+let collapsedProjectGroups=(()=>{try{return JSON.parse(localStorage.getItem(PROJECT_GROUPS_STORAGE)||'{}')}catch{return {}}})();
+function setProjectGroupCollapsed(key,value){collapsedProjectGroups[key]=value;try{localStorage.setItem(PROJECT_GROUPS_STORAGE,JSON.stringify(collapsedProjectGroups))}catch{}}
 
 function normalizeDB(raw){
   const db=raw&&typeof raw==='object'?raw:seed();
@@ -256,6 +259,12 @@ function renderLogin(initialError=''){
 const ADMIN_NAV=[['dashboard','Visão geral'],['progress','Andamentos'],['clients','Clientes'],['projects','Projetos'],['payments','Financeiro'],['documents','Documentos'],['plans','Planos de trabalho'],['metas','Metas'],['users','Usuários']];
 const COMERCIAL_NAV=[['clients','Clientes'],['projects','Projetos'],['plans','Planos de trabalho']];
 function navItems(){if(isAdmin())return ADMIN_NAV;if(isComercial())return COMERCIAL_NAV;if(isTechDirector())return [['metas','Metas']];if(isMetasSector())return [['plans','Planos de trabalho'],['metas','Metas']];return [['plans','Planos de trabalho']];}
+
+async function changeOwnPassword(){
+  openModal('Alterar minha senha',`<form id="ownPasswordForm" class="form-grid"><div class="field full"><label>Nova senha</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div><div class="field full"><label>Confirmar nova senha</label><input name="confirm" type="password" autocomplete="new-password" minlength="8" required></div><div id="ownPasswordStatus" class="field full muted">Use pelo menos 8 caracteres.</div></form>`,()=>$('#ownPasswordForm').requestSubmit());
+  $('#ownPasswordForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),password=String(fd.get('password')||''),confirm=String(fd.get('confirm')||''),status=$('#ownPasswordStatus');if(password.length<8){status.textContent='A senha precisa ter pelo menos 8 caracteres.';return}if(password!==confirm){status.textContent='As senhas não coincidem.';return}const btn=$('#modalSave');btn.disabled=true;btn.textContent='Alterando...';const {error}=await sb.auth.updateUser({password});if(error){status.textContent=error.message;btn.disabled=false;btn.textContent='Salvar';return}status.textContent='Senha alterada com sucesso.';btn.textContent='Concluído';setTimeout(closeModal,700)};
+}
+
 function renderApp(){
   matrixStop();
   const allowedViews=navItems().map(([id])=>id);
@@ -263,9 +272,10 @@ function renderApp(){
   $('#app').innerHTML=`<div class="shell"><aside class="sidebar">
     <div class="brand"><img src="logo-integral.png" alt="Integral"></div>
     <nav class="nav">${navItems().map(([id,label])=>`<button data-view="${id}" class="${currentView===id?'active':''}">${label}</button>`).join('')}</nav>
-    <div class="sidebar-foot"><div class="user-mini"><strong>${esc(currentUser.name)}</strong>${esc(currentUser.type)}</div><button id="logout" class="btn secondary wide">Sair</button></div>
+    <div class="sidebar-foot"><div class="user-mini"><strong>${esc(currentUser.name)}</strong>${esc(currentUser.type)}</div><button id="changeMyPassword" class="security-link-btn" type="button">Alterar minha senha</button><button id="logout" class="btn secondary wide">Sair</button></div>
   </aside><section class="main"><header class="topbar"><h2 id="pageTitle"></h2><span class="badge">${esc(currentUser.type)}</span></header><div id="content" class="content"></div></section></div>`;
   $$('.nav button').forEach(b=>b.onclick=()=>{currentView=b.dataset.view;currentProjectId=null;searchTerm='';metasScreen='home';metasSectorFilter=null;metasBoardUser=null;renderApp()});
+  $('#changeMyPassword').onclick=changeOwnPassword;
   $('#logout').onclick=async()=>{await sb.auth.signOut();renderLogin();};
   renderView();
 }
@@ -372,12 +382,13 @@ function renderProjects(){
   const q=searchTerm.trim().toLowerCase();
   const rows=db.projects.filter(p=>(`${p.name} ${findClient(p.clientId)?.name||''} ${p.type} ${p.manager||''}`).toLowerCase().includes(q));
   const groups={};rows.forEach(p=>(groups[p.type||'OUTROS']??=[]).push(p));
-  $('#content').innerHTML=`<div class="toolbar"><div class="left"><input id="searchProjects" class="search" placeholder="Pesquisar projeto, cliente, tipo ou responsável" value="${esc(searchTerm)}"></div><div class="right"><button id="newProject" class="btn">Adicionar projeto</button></div></div>${SERVICE_TYPES.map(t=>groups[t]?.length?`<section class="project-group"><div class="group-title">${t} <span>${groups[t].length}</span></div><div class="table-wrap"><table class="table project-table"><thead><tr><th>Projeto</th><th>Cliente</th><th>Responsável</th><th>Prazo</th><th>Andamento</th><th>Status</th><th></th></tr></thead><tbody>${groups[t].map(p=>`<tr><td><button class="project-link" data-open-project="${p.id}">${esc(p.name)}</button><small class="project-sub">Início: ${brDate(p.start)}</small></td><td>${esc(findClient(p.clientId)?.name||'—')}</td><td>${esc(p.manager||'—')}</td><td>${brDate(p.deadline)}</td><td><div class="progress"><i style="width:${projectProgress(p)}%"></i></div><span class="muted">${projectProgress(p)}%</span></td><td>${statusBadge(p.status)}</td><td class="actions"><button class="btn icon secondary" data-edit-project="${p.id}" title="Editar">✎</button><button class="btn icon danger" data-del-project="${p.id}" title="Excluir">×</button></td></tr>`).join('')}</tbody></table></div></section>`:'').join('')||'<div class="empty">Nenhum projeto encontrado.</div>'}`;
+  $('#content').innerHTML=`<div class="toolbar"><div class="left"><input id="searchProjects" class="search" placeholder="Pesquisar projeto, cliente, tipo ou responsável" value="${esc(searchTerm)}"></div><div class="right"><button id="newProject" class="btn">Adicionar projeto</button></div></div>${SERVICE_TYPES.map(t=>groups[t]?.length?`<section class="project-group ${collapsedProjectGroups[t]?'collapsed':''}" data-project-group="${esc(t)}"><div class="group-title"><button type="button" class="project-group-toggle" data-toggle-project-group="${esc(t)}" aria-expanded="${collapsedProjectGroups[t]?'false':'true'}"><span class="chev">⌄</span><span>${t}</span><span>${groups[t].length}</span></button></div><div class="table-wrap"><table class="table project-table"><thead><tr><th>Projeto</th><th>Cliente</th><th>Responsável</th><th>Prazo</th><th>Andamento</th><th>Status</th><th></th></tr></thead><tbody>${groups[t].map(p=>`<tr><td><button class="project-link" data-open-project="${p.id}">${esc(p.name)}</button><small class="project-sub">Início: ${brDate(p.start)}</small></td><td>${esc(findClient(p.clientId)?.name||'—')}</td><td>${esc(p.manager||'—')}</td><td>${brDate(p.deadline)}</td><td><div class="progress"><i style="width:${projectProgress(p)}%"></i></div><span class="muted">${projectProgress(p)}%</span></td><td>${statusBadge(p.status)}</td><td class="actions"><button class="btn icon secondary" data-edit-project="${p.id}" title="Editar">✎</button><button class="btn icon danger" data-del-project="${p.id}" title="Excluir">×</button></td></tr>`).join('')}</tbody></table></div></section>`:'').join('')||'<div class="empty">Nenhum projeto encontrado.</div>'}`;
   $('#searchProjects').oninput=e=>{searchTerm=e.target.value;renderProjects()};
   $('#newProject').onclick=()=>projectModal();
   $$('[data-open-project]').forEach(b=>b.onclick=()=>{currentProjectId=b.dataset.openProject;renderProjects()});
   $$('[data-edit-project]').forEach(b=>b.onclick=()=>projectModal(findProject(b.dataset.editProject)));
   $$('[data-del-project]').forEach(b=>b.onclick=()=>deleteProject(b.dataset.delProject));
+  $$('[data-toggle-project-group]').forEach(b=>b.onclick=()=>{const key=b.dataset.toggleProjectGroup;setProjectGroupCollapsed(key,!collapsedProjectGroups[key]);renderProjects()});
 }
 function renderProjectDetail(){
   const p=findProject(currentProjectId);if(!p){currentProjectId=null;renderProjects();return}
