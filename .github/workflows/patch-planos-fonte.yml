@@ -1,6 +1,6 @@
 name: patch-planos-fonte
 
-on:
+"on":
   push:
     paths:
       - '.github/workflows/patch-planos-fonte.yml'
