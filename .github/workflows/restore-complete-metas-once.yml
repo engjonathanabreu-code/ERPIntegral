@@ -12,116 +12,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restaurar modulo completo de Metas no fonte
+      - name: Restaurar Metas no codigo fonte
         run: |
           set -e
-          FILE='ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js'
-          CSS='ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.css'
-          INDEX='ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html'
-          # Parte de uma versao limpa que ja continha OS, setores, metas ativas, observacoes e aprovacao.
-          git show 1f9f783ef6ca72d8271c6a54e982f87cf6bd17f3:"$FILE" > "$FILE"
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js')
-          s=p.read_text()
-
-          # Filtro profissional incorporado ao fonte.
-          marker="const normRole=v=>String(v||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim();"
-          if 'function allowedProfessional' not in s:
-              s=s.replace(marker, marker+"\nfunction allowedProfessional(u){const t=normRole(u?.type||u?.role||'');return t.includes('projet')||t.includes('topografia')||t.includes('pos protocolo');}")
-          s=s.replace("db().users.filter(u=>u.active):[currentUser()]","db().users.filter(u=>u.active&&allowedProfessional(u)):[currentUser()]")
-          s=s.replace("db().users.filter(u=>u.active).map(u=>`<label class=\"check-item\">","db().users.filter(u=>u.active&&allowedProfessional(u)).map(u=>`<label class=\"check-item\">")
-
-          # Tela inicial: mostra metas ativas diretamente, ate 15 cards.
-          old="<h3 class=\"section-title\">Colaboradores</h3><div class=\"metas-emp-grid\">"
-          new="<section class=\"card metas2-active-home\"><div class=\"section-head\"><div><h3>Metas ativas</h3><p class=\"muted\">Até 15 metas em aberto, para acompanhamento rápido.</p></div><button type=\"button\" class=\"btn small secondary\" id=\"metaActiveAll\">Ver todas</button></div>${active.length?`<div class=\"metas2-card-grid\">${active.slice(0,15).map(metaCardHtml).join('')}</div>`:'<div class=\"empty compact\">Nenhuma meta ativa.</div>'}</section><h3 class=\"section-title\">Colaboradores</h3><div class=\"metas-emp-grid\">"
-          if old in s:
-              s=s.replace(old,new,1)
-          # Conecta botao Ver todas depois do wire toolbar.
-          s=s.replace("wireToolbar();wireMetaCards();qsa('[data-meta-user]')", "wireToolbar();qs('#metaActiveAll')?.addEventListener('click',()=>{state.screen='active';renderActive()});wireMetaCards();qsa('[data-meta-user]')",1)
-
-          # Atalho de setores no toolbar principal.
-          old_toolbar="<button class=\"btn secondary\" id=\"metaOrders\">Ordens de Serviço</button><button class=\"btn secondary\" id=\"metaActive\">Metas Ativas</button>${canManageMeta()?'<button class=\"btn\" id=\"metaNew\">+ Nova Meta</button>':''}"
-          new_toolbar="<button class=\"btn secondary\" id=\"metaOrders\">Ordens de Serviço</button><button class=\"btn secondary\" id=\"metaActive\">Metas Ativas</button>${canManageSectors()?'<button class=\"btn secondary\" id=\"metaSectorQuick\">+ Setor</button>':''}${canManageMeta()?'<button class=\"btn\" id=\"metaNew\">+ Nova Meta</button>':''}"
-          s=s.replace(old_toolbar,new_toolbar,1)
-          s=s.replace("qs('#metaActive')?.addEventListener('click',()=>{state.screen='active';renderActive()});qs('#metaNew')", "qs('#metaActive')?.addEventListener('click',()=>{state.screen='active';renderActive()});qs('#metaSectorQuick')?.addEventListener('click',()=>sectorModal());qs('#metaNew')",1)
-
-          # Colaboracao (checklist + comentarios) incorporada diretamente ao modulo, sem MutationObserver.
-          collab=r'''
-async function loadMetaCollaboration(metaId){
-  const client=sb();
-  const [c,k]=await Promise.all([
-    client.from('meta_comentarios').select('*').eq('meta_id',metaId).order('created_at'),
-    client.from('meta_checklist').select('*').eq('meta_id',metaId).order('created_at')
-  ]);
-  if(c.error)throw c.error;if(k.error)throw k.error;
-  return {comments:c.data||[],checklist:k.data||[]};
-}
-function canCollaborateMeta(m){return canManageMeta()||m.created_by===currentUser()?.id||metaResponsibles(m.id).includes(currentUser()?.id)}
-async function wireMetaCollaboration(m){
-  const modal=qs('#modal .modal');if(!modal)return;
-  let data;try{data=await loadMetaCollaboration(m.id)}catch(e){console.warn('Colaboração da meta:',e);return}
-  const tabs=qs('.metas-tabs',modal),actions=qs('.meta-admin-actions',modal)||qs('.modal-foot',modal);if(!tabs||!actions)return;
-  tabs.insertAdjacentHTML('beforeend',`<button class="metas-tab" data-v2tab="checklist">Checklist (${data.checklist.length})</button><button class="metas-tab" data-v2tab="comments">Comentários (${data.comments.length})</button>`);
-  const check=document.createElement('div');check.className='metas-tab-panel hidden';check.dataset.v2panel='checklist';
-  const comments=document.createElement('div');comments.className='metas-tab-panel hidden';comments.dataset.v2panel='comments';
-  actions.parentNode.insertBefore(check,actions);actions.parentNode.insertBefore(comments,actions);
-  const can=canCollaborateMeta(m);
-  check.innerHTML=`<div class="meta-checklist-list">${data.checklist.length?data.checklist.map(x=>`<div class="meta-check-item ${x.concluido?'done':''}" data-check-id="${x.id}"><input type="checkbox" ${x.concluido?'checked':''} ${can?'':'disabled'}><div class="meta-check-text"><strong>${esc(x.titulo)}</strong>${x.concluido?`<div class="meta-check-meta">Concluído por ${esc(userName(x.concluido_por))}</div>`:''}</div>${can?'<button type="button" class="meta-check-delete">×</button>':''}</div>`).join(''):'<div class="empty compact">Nenhum item no checklist.</div>'}</div>${can?'<div class="meta-collab-add"><input id="newMetaChecklistItem" placeholder="Novo item do checklist"><button type="button" class="btn secondary" id="addMetaChecklistItem">Adicionar item</button></div>':''}`;
-  comments.innerHTML=`<div class="meta-comments-list">${data.comments.length?data.comments.map(c=>`<div class="meta-comment-item"><div class="meta-comment-head"><strong>${esc(userName(c.autor_id))}</strong><span class="muted">${new Date(c.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(c.texto)}</p></div>`).join(''):'<div class="empty compact">Nenhum comentário.</div>'}</div>${can?'<div class="meta-collab-add"><textarea id="newMetaComment" rows="3" placeholder="Escreva um comentário..."></textarea><button type="button" class="btn secondary" id="addMetaComment">Enviar comentário</button></div>':''}`;
-  qsa('[data-v2tab]',modal).forEach(t=>t.onclick=()=>{qsa('[data-v2tab]',modal).forEach(x=>x.classList.remove('active'));t.classList.add('active');qsa('[data-v2panel]',modal).forEach(p=>p.classList.toggle('hidden',p.dataset.v2panel!==t.dataset.v2tab))});
-  if(!can)return;
-  qsa('.meta-check-item',check).forEach(row=>{
-    const input=qs('input',row);
-    input.onchange=async()=>{const done=input.checked;const r=await sb().from('meta_checklist').update({concluido:done,concluido_por:done?currentUser().id:null,concluido_em:done?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('id',row.dataset.checkId).select().single();if(r.error){alert(r.error.message);input.checked=!done;return}await historyAdd(m,{acao:done?'Checklist concluído':'Checklist reaberto',descricao:r.data.titulo});B().closeModal();metaDetail(m.id)};
-    qs('.meta-check-delete',row)?.addEventListener('click',async()=>{if(!confirm('Excluir este item do checklist?'))return;const r=await sb().from('meta_checklist').delete().eq('id',row.dataset.checkId);if(r.error){alert(r.error.message);return}await historyAdd(m,{acao:'Checklist removido',descricao:'Item removido do checklist.'});B().closeModal();metaDetail(m.id)});
-  });
-  qs('#addMetaChecklistItem',check)?.addEventListener('click',async()=>{const inp=qs('#newMetaChecklistItem',check),titulo=inp.value.trim();if(!titulo)return;const r=await sb().from('meta_checklist').insert({id:uid(),meta_id:m.id,titulo,created_by:currentUser().id}).select().single();if(r.error){alert(r.error.message);return}await historyAdd(m,{acao:'Checklist adicionado',descricao:titulo});B().closeModal();metaDetail(m.id)});
-  qs('#addMetaComment',comments)?.addEventListener('click',async()=>{const inp=qs('#newMetaComment',comments),texto=inp.value.trim();if(!texto)return;const r=await sb().from('meta_comentarios').insert({id:uid(),meta_id:m.id,autor_id:currentUser().id,texto}).select().single();if(r.error){alert(r.error.message);return}await historyAdd(m,{acao:'Comentário adicionado',descricao:texto.length>120?texto.slice(0,120)+'…':texto});B().closeModal();metaDetail(m.id)});
-}
-
-'''
-          s=s.replace('function renderLoading()',collab+'function renderLoading()',1)
-
-          # Checklist inicial no formulario de Nova/Editar Meta.
-          # Busca itens nao concluidos quando estiver editando.
-          sig="async function metaModal(prefill=null,defaultUserId=null){if(B()?.refreshCore)await B().refreshCore();const m=prefill?.id?prefill:null;"
-          repl="async function metaModal(prefill=null,defaultUserId=null){if(B()?.refreshCore)await B().refreshCore();const m=prefill?.id?prefill:null;let checklistInicial=[];if(m){const ck=await sb().from('meta_checklist').select('titulo,concluido').eq('meta_id',m.id).order('created_at');if(!ck.error)checklistInicial=(ck.data||[]).filter(x=>!x.concluido).map(x=>x.titulo);}"
-          s=s.replace(sig,repl,1)
-          # Insere campo apos observacoes.
-          obs='''<div class="field full"><label>Observações</label><textarea name="observacoes" placeholder="Contexto, instruções ou observações da meta">${esc(m?.observacoes||'')}</textarea></div>'''
-          checklist='''<div class="field full"><label>Checklist</label><textarea name="checklist" rows="4" placeholder="Digite um item por linha">${esc(checklistInicial.join('\\n'))}</textarea><small class="muted">Cada linha será criada como um item marcável dentro da meta.</small></div>'''
-          s=s.replace(obs,obs+checklist,1)
-          # Salva checklist inicial preservando itens ja concluidos.
-          target="const ins=await sb().from('meta_responsaveis').insert(responsaveis.map(usuario_id=>({meta_id:id,usuario_id})));if(ins.error){alert(ins.error.message);return}"
-          add=target+"const checklist=String(fd.get('checklist')||'').split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);const delCk=await sb().from('meta_checklist').delete().eq('meta_id',id).eq('concluido',false);if(delCk.error){alert(delCk.error.message);return}if(checklist.length){const ckIns=await sb().from('meta_checklist').insert(checklist.map(titulo=>({id:uid(),meta_id:id,titulo,created_by:currentUser().id})));if(ckIns.error){alert(ckIns.error.message);return}}"
-          s=s.replace(target,add,1)
-
-          # Detalhe da meta recebe checklist/comentarios nativamente.
-          needle="qsa('[data-open-meta-file]').forEach(b=>b.onclick=()=>openMetaFile(state.files.find(f=>f.id===b.dataset.openMetaFile)))}"
-          s=s.replace(needle,"qsa('[data-open-meta-file]').forEach(b=>b.onclick=()=>openMetaFile(state.files.find(f=>f.id===b.dataset.openMetaFile)));wireMetaCollaboration(m)}",1)
-
-          p.write_text(s)
-
-          # CSS: garante densidade e estilos de colaboracao.
-          c=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.css')
-          css=c.read_text()
-          if '.meta-checklist-list' not in css:
-              css += '\n.meta-checklist-list,.meta-comments-list{display:grid;gap:8px}.meta-check-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line,#d9e4e2);padding:10px 12px;border-radius:10px;background:#fff}.meta-check-item.done .meta-check-text{text-decoration:line-through;opacity:.62}.meta-check-item input{width:18px;height:18px}.meta-check-text{flex:1;min-width:0}.meta-check-meta{font-size:11px;color:var(--muted,#70807e)}.meta-collab-add{display:flex;gap:8px;margin-top:12px}.meta-collab-add input,.meta-collab-add textarea{flex:1;min-width:0}.meta-comment-item{border-left:3px solid #7bbdb6;background:#f8fbfb;border-radius:0 10px 10px 0;padding:10px 12px}.meta-comment-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px}.meta-comment-item p{margin:0;white-space:pre-wrap}.meta-check-delete{border:0;background:transparent;cursor:pointer;font-size:18px;opacity:.6}.metas2-active-home{margin-top:14px}.metas2-card-grid{grid-template-columns:repeat(auto-fill,minmax(185px,1fr))}.metas2-card{min-height:0;padding:12px}.metas2-card p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n'
-          c.write_text(css)
-
-          # Cache bust.
-          i=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html')
-          t=i.read_text().replace('metas-v2.css?v=16','metas-v2.css?v=17').replace('metas-v2.js?v=16','metas-v2.js?v=17')
-          i.write_text(t)
-          PY
-          node --check "$FILE"
-          grep -q 'Ordens de Serviço' "$FILE"
-          grep -q 'Metas ativas' "$FILE"
-          grep -q 'Checklist' "$FILE"
-          grep -q 'Observações' "$FILE"
-          rm -f .github/workflows/restore-complete-metas-once.yml
+          python scripts/restore_complete_metas.py
+          node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          grep -q 'Ordens de Serviço' ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          grep -q 'Metas ativas' ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          grep -q 'Checklist' ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          grep -q 'Observações' ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          rm -f scripts/restore_complete_metas.py .github/workflows/restore-complete-metas-once.yml
           git config user.name 'Integral Metas Source Restore'
           git config user.email 'actions@users.noreply.github.com'
           git add -A
