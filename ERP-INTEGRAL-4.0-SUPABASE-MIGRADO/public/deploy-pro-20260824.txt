@@ -1,1 +1,2 @@
-Publicação ERP Integral — Metas e Usuários refatorados no código-fonte — 2026-08-25
+ERP Integral — deploy marker
+Consolidacao final do codigo fonte publicada em 25/08/2026.
