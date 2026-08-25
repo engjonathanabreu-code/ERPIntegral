@@ -1,0 +1,109 @@
+name: Polish users UI once
+on:
+  push:
+    paths:
+      - '.github/workflows/polish-users-ui-once.yml'
+permissions:
+  contents: write
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ajustar cards de usuarios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          css=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css')
+          s=css.read_text()
+          marker='/* Usuarios: cards refinados v17 */'
+          block=r'''
+
+/* Usuarios: cards refinados v17 */
+.user-card-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(245px,1fr));
+  gap:16px;
+  align-items:stretch;
+}
+.user-admin-card{
+  width:100%;
+  min-height:154px;
+  padding:18px 18px 16px;
+  text-align:left;
+  color:var(--text);
+  border:1px solid var(--line);
+  background:#fff;
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+  overflow:hidden;
+}
+.user-admin-card:hover{
+  transform:translateY(-2px);
+  border-color:rgba(15,95,91,.32);
+  box-shadow:0 14px 32px rgba(15,95,91,.14);
+}
+.user-admin-card-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  min-width:0;
+}
+.user-admin-card-head>div{
+  min-width:0;
+  flex:1 1 auto;
+}
+.user-admin-card-head strong{
+  display:block;
+  font-size:16px;
+  line-height:1.22;
+  color:#111;
+  overflow-wrap:anywhere;
+}
+.user-admin-card-head .muted{
+  margin-top:3px;
+  line-height:1.25;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.user-admin-card-head>.badge{
+  flex:0 0 auto;
+  margin:0;
+  align-self:flex-start;
+  white-space:nowrap;
+  padding:5px 9px;
+  line-height:1;
+}
+.user-admin-card-meta{
+  display:grid;
+  gap:6px;
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid #edf3f2;
+  font-size:13px;
+  line-height:1.3;
+}
+.user-admin-card-meta span{
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+.user-admin-card-meta b{
+  color:var(--text);
+}
+@media(max-width:720px){
+  .user-card-grid{grid-template-columns:1fr}
+  .user-admin-card{min-height:auto}
+}
+'''
+          if marker not in s:
+              css.write_text(s+block)
+          idx=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html')
+          h=idx.read_text().replace('styles.css?v=16','styles.css?v=17')
+          idx.write_text(h)
+          PY
+          git config user.name "Integral ERP UI"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html
+          git commit -m "style: refinar cards e status da tela de usuarios" || true
+          git push
