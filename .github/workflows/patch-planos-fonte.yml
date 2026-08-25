@@ -1,0 +1,122 @@
+name: Patch Planos de Trabalho no fonte
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-planos-fonte.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Alterar app.js e estilos no fonte
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          base = Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public')
+          app_path = base / 'app.js'
+          css_path = base / 'styles.css'
+          index_path = base / 'index.html'
+
+          app = app_path.read_text(encoding='utf-8')
+
+          if "let currentPlanDetailId=null;" not in app:
+              app = app.replace("let currentProjectId=null;\n", "let currentProjectId=null;\nlet currentPlanDetailId=null;\n", 1)
+
+          new_block = r'''function renderPlans(){
+  title('Planos de trabalho');
+  const plans=db.plans.filter(canSeePlan);
+  let active=currentPlanDetailId?plans.find(p=>p.id===currentPlanDetailId):null;
+  if(currentPlanDetailId&&!active)currentPlanDetailId=null;
+
+  if(active){
+    $('#content').innerHTML=`<div class="toolbar plan-detail-toolbar"><button id="backPlans" class="btn secondary">← Voltar aos planos</button><div class="right"><span class="muted">Visualização completa do plano</span></div></div>${planCard(active)}`;
+    $('#backPlans').onclick=()=>{currentPlanDetailId=null;renderPlans()};
+    wirePlanEvents();
+    return;
+  }
+
+  $('#content').innerHTML=`${canManageCore()?'<div class="toolbar"><div><b>Planos de trabalho</b><div class="muted">Clique em um plano para abrir todas as etapas e alimentar o trabalho.</div></div><button id="newPlan" class="btn">Criar plano de trabalho</button></div>':'<div class="toolbar"><div><b>Planos de trabalho</b><div class="muted">Clique em um plano para abrir todas as etapas.</div></div></div>'}<div class="plan-index-list">${plans.map(planSummaryRow).join('')||'<div class="empty">Nenhum plano de trabalho disponível para este usuário.</div>'}</div>`;
+  if(canManageCore())$('#newPlan').onclick=()=>planModal();
+  $$('[data-open-plan]').forEach(row=>row.onclick=e=>{if(e.target.closest('[data-edit-plan],[data-del-plan]'))return;currentPlanDetailId=row.dataset.openPlan;renderPlans()});
+  $$('[data-edit-plan]').forEach(b=>b.onclick=e=>{e.stopPropagation();planModal(db.plans.find(x=>x.id===b.dataset.editPlan))});
+  $$('[data-del-plan]').forEach(b=>b.onclick=e=>{e.stopPropagation();if(confirm('Excluir plano?')){db.plans=db.plans.filter(x=>x.id!==b.dataset.delPlan);saveDB();renderPlans()}});
+}
+function planSummaryRow(p){
+  const project=findProject(p.projectId);
+  const total=p.steps.reduce((a,s)=>a+s.deliverables.length,0);
+  const done=p.steps.reduce((a,s)=>a+s.deliverables.filter(d=>d.done).length,0);
+  const pct=total?Math.round(done/total*100):0;
+  const openSteps=p.steps.filter(s=>s.status!=='Concluída');
+  const current=openSteps.length?openSteps[openSteps.length-1]:null;
+  const d=current?.deadline?daysUntil(current.deadline):null;
+  const deadlineClass=current?.deadline&&d<0?'danger':current?.deadline&&d<=7?'warn':'';
+  return `<section class="card plan-index-row" data-open-plan="${p.id}" tabindex="0" role="button"><div class="plan-index-primary"><h3>${esc(p.title)}</h3><span class="muted">${esc(project?.name||'Sem projeto')}</span></div><div class="plan-index-stage"><small>Última etapa em aberto</small>${current?`<strong>${esc(current.title)}</strong><span><span class="badge">${esc(current.status||'Pendente')}</span>${current.deadline?` <span class="badge ${deadlineClass}">Prazo ${brDate(current.deadline)}</span>`:''}</span>`:'<strong>Nenhuma etapa em aberto</strong><span class="muted">Sem pendências cadastradas</span>'}</div><div class="plan-index-progress"><small>Progresso dos entregáveis</small><strong>${pct}%</strong><div class="progress"><i style="width:${pct}%"></i></div></div><div class="plan-index-status"><span class="badge ${p.status==='Concluído'?'ok':''}">${esc(p.status)}</span><span class="plan-index-open">Abrir plano →</span></div>${canManageCore()?`<div class="actions plan-index-actions"><button class="btn icon secondary" data-edit-plan="${p.id}" title="Editar plano">✎</button><button class="btn icon danger" data-del-plan="${p.id}" title="Excluir plano">×</button></div>`:''}</section>`;
+}
+function wirePlanEvents(){
+  $$('[data-edit-plan]').forEach(b=>b.onclick=()=>planModal(db.plans.find(x=>x.id===b.dataset.editPlan)));
+  $$('[data-del-plan]').forEach(b=>b.onclick=()=>{if(confirm('Excluir plano?')){const deleted=b.dataset.delPlan;db.plans=db.plans.filter(x=>x.id!==deleted);if(currentPlanDetailId===deleted)currentPlanDetailId=null;saveDB();renderPlans()}});
+  $$('[data-add-step]').forEach(b=>b.onclick=()=>stepModal(db.plans.find(x=>x.id===b.dataset.addStep)));
+  $$('[data-edit-step]').forEach(b=>{b.onclick=()=>{const p=db.plans.find(x=>x.id===b.dataset.plan);stepModal(p,p.steps.find(x=>x.id===b.dataset.editStep))}});
+  $$('[data-del-step]').forEach(b=>b.onclick=()=>{const p=db.plans.find(x=>x.id===b.dataset.plan);if(confirm('Excluir etapa?')){p.steps=p.steps.filter(x=>x.id!==b.dataset.delStep);saveDB();renderPlans()}});
+  $$('[data-step-status]').forEach(s=>s.onchange=()=>updateStepField(s.dataset.plan,s.dataset.step,'status',s.value));
+  $$('[data-step-notes]').forEach(t=>t.onchange=()=>updateStepField(t.dataset.plan,t.dataset.step,'notes',t.value));
+  $$('[data-deliverable]').forEach(c=>c.onchange=()=>{const p=db.plans.find(x=>x.id===c.dataset.plan),s=p.steps.find(x=>x.id===c.dataset.step),d=s.deliverables.find(x=>x.id===c.dataset.deliverable);if(canEditStep(s)){d.done=c.checked;saveDB();renderPlans()}});
+}
+'''
+
+          pattern = r"function renderPlans\(\)\{.*?\n\}\n(?=function planCard\()"
+          app2, n = re.subn(pattern, new_block, app, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f'Não foi possível localizar renderPlans no app.js (matches={n})')
+          app_path.write_text(app2, encoding='utf-8')
+
+          css = css_path.read_text(encoding='utf-8')
+          marker = '/* PLANOS_TRABALHO_INDEX_FONTE_V2 */'
+          if marker not in css:
+              css += r'''
+
+/* PLANOS_TRABALHO_INDEX_FONTE_V2 */
+.plan-index-list{display:flex;flex-direction:column;gap:10px}
+.plan-index-row{display:grid;grid-template-columns:minmax(220px,1.25fr) minmax(280px,1.55fr) minmax(150px,.75fr) auto auto;gap:18px;align-items:center;margin:0;padding:16px 18px;cursor:pointer;transition:.16s ease;border:1px solid var(--line,#dfe7e5)}
+.plan-index-row:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(16,91,85,.08);border-color:rgba(15,122,116,.35)}
+.plan-index-primary,.plan-index-stage,.plan-index-progress,.plan-index-status{min-width:0;display:flex;flex-direction:column;gap:5px}
+.plan-index-primary h3{margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-index-stage small,.plan-index-progress small{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#6d7d7a)}
+.plan-index-stage strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+.plan-index-progress .progress{height:6px;margin-top:2px;min-width:120px}
+.plan-index-status{align-items:flex-end;white-space:nowrap}
+.plan-index-open{font-size:12px;color:var(--primary,#0f7a74);font-weight:700}
+.plan-index-actions{justify-content:flex-end;white-space:nowrap}
+.plan-detail-toolbar{margin-bottom:14px}
+@media(max-width:1050px){.plan-index-row{grid-template-columns:1fr 1.2fr auto}.plan-index-progress{display:none}.plan-index-actions{grid-column:3}.plan-index-status{grid-row:1;grid-column:3}.plan-index-actions{grid-row:2}}
+@media(max-width:720px){.plan-index-row{grid-template-columns:1fr;gap:10px}.plan-index-status{grid-row:auto;grid-column:auto;align-items:flex-start}.plan-index-actions{grid-row:auto;grid-column:auto;justify-content:flex-start}.plan-index-progress{display:flex}}
+'''
+              css_path.write_text(css, encoding='utf-8')
+
+          index = index_path.read_text(encoding='utf-8')
+          index = re.sub(r'\s*<link rel="stylesheet" href="planos-trabalho-v1\.css\?v=\d+" />', '', index)
+          index = re.sub(r'\s*<script src="planos-trabalho-v1\.js\?v=\d+"></script>', '', index)
+          index = re.sub(r'app\.js\?v=\d+', 'app.js?v=17', index)
+          index = re.sub(r'styles\.css\?v=\d+', 'styles.css?v=17', index)
+          index_path.write_text(index, encoding='utf-8')
+          PY
+      - name: Validar sintaxe
+        run: node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+      - name: Commit da correção no fonte
+        run: |
+          git config user.name "Integral ERP Source Patch"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html
+          git commit -m "fix: implementar mini menus de planos direto no fonte"
+          git push origin main
