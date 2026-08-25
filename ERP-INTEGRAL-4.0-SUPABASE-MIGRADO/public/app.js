@@ -5,6 +5,7 @@ const APP_KEY='erp_integral_v2_db';
 const SESSION_KEY='erp_integral_v2_session';
 const SERVICE_TYPES=['REURB PRIVADO','REURB LICITADO','ETSA','ETSA + ORTOFOTO','OUTROS'];
 const USER_TYPES=['Administrador','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];
+const USER_SECTORS=['Administrativo','Comercial','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos'];
 const METAS_SECTORS=['Projetos','Topografia','Pós-protocolo','Atendimentos'];
 const PLAN_STATUS_COLUMNS=['Planejamento','Em andamento','Concluído','Cancelado'];
 const WEEKDAY_LABELS=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -117,7 +118,7 @@ async function loadRemoteDB(){
   const comments=throwIfError(commentsR,'Comentários');
 
   db={version:3,
-    users:profiles.map(x=>({id:x.id,name:x.nome,cpf:x.cpf||'',email:x.email||'',type:x.tipo,active:x.ativo!==false,createdAt:(x.created_at||'').slice(0,10)})),
+    users:profiles.map(x=>({id:x.id,name:x.nome,cpf:x.cpf||'',email:x.email||'',type:x.tipo,sector:x.setor||x.tipo,active:x.ativo!==false,createdAt:(x.created_at||'').slice(0,10)})),
     clients:clients.map(x=>({id:x.id,name:x.nome,state:x.estado,city:x.cidade||'',contact:x.telefone||x.email||x.documento||'',createdAt:(x.created_at||'').slice(0,10)})),
     projects:projects.map(x=>({id:x.id,name:x.nome,clientId:x.cliente_id||'',type:x.tipo_servico,manager:x.responsavel||'',status:x.status,start:x.data_inicio||'',deadline:x.prazo_final||'',contractValue:Number(x.valor_contrato||0),notes:x.observacoes||'',createdAt:(x.created_at||'').slice(0,10),stages:stages.filter(s=>s.projeto_id===x.id).map(s=>({id:s.id,name:s.titulo,owner:s.descricao||'',deadline:s.prazo||'',progress:Number(s.progresso||0),weight:Number(s.peso||0),status:projectStageStatusFromRemote(s.status)}))})),
     payments:payments.map(x=>({id:x.id,projectId:x.projeto_id,name:x.nome_etapa,value:Number(x.valor_previsto||0),receivedValue:Number(x.valor_recebido||0),percent:0,dueDate:x.vencimento||'',paid:x.status==='Pago',paidAt:x.data_pagamento||'',createdAt:(x.created_at||'').slice(0,10)})),
@@ -132,7 +133,7 @@ async function getProfile(authUser){
   if(error)throw error;
   if(!data)throw new Error('Seu perfil não foi encontrado. Execute novamente o script de configuração ou confirme o usuário em public.profiles.');
   if(!data.ativo)throw new Error('Este usuário está inativo.');
-  return {id:data.id,name:data.nome,cpf:data.cpf||'',email:data.email||authUser.email||'',type:data.tipo,active:data.ativo};
+  return {id:data.id,name:data.nome,cpf:data.cpf||'',email:data.email||authUser.email||'',type:data.tipo,sector:data.setor||data.tipo,active:data.ativo};
 }
 
 async function init(){
@@ -170,7 +171,7 @@ async function syncRemoteDB(){
   if(syncing){pendingSync=true;return;} syncing=true;
   try{
     if(isAdmin()){
-      await upsertRows('profiles',db.users.map(u=>({id:u.id,nome:u.name||'',cpf:u.cpf||null,email:u.email||null,tipo:u.type,ativo:u.active!==false})));
+      await upsertRows('profiles',db.users.map(u=>({id:u.id,nome:u.name||'',cpf:u.cpf||null,email:u.email||null,tipo:u.type,setor:u.sector||u.type,ativo:u.active!==false})));
     }
     if(canManageCore()){
       await upsertRows('clientes',db.clients.map(c=>({id:c.id,nome:c.name,estado:c.state,cidade:c.city||null,telefone:c.contact||null,created_by:currentUser.id})));
@@ -693,32 +694,37 @@ function metasCardModal(plan,onChange){
 
 function renderUsers(){
   title('Usuários');
-  $('#content').innerHTML=`<div class="toolbar"><div class="muted">Novos usuários recebem acesso por e-mail e senha do Supabase.</div><button id="newUser" class="btn">Adicionar usuário</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Tipo</th><th>Status</th><th></th></tr></thead><tbody>${db.users.map(u=>`<tr><td>${esc(u.name)}</td><td>${u.cpf?fmtCpf(u.cpf):'—'}</td><td>${esc(u.email)}</td><td>${esc(u.type)}</td><td><span class="badge ${u.active?'ok':'danger'}">${u.active?'Ativo':'Inativo'}</span></td><td class="actions"><button class="btn icon secondary" data-edit-user="${u.id}">✎</button>${u.id!==currentUser.id?`<button class="btn small ${u.active?'danger':'secondary'}" data-toggle-user="${u.id}">${u.active?'Desativar':'Ativar'}</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+  $('#content').innerHTML=`<div class="toolbar"><div><b>Equipe e acessos</b><div class="muted">Clique em um usuário para editar dados, acesso e consultar o histórico de metas.</div></div><button id="newUser" class="btn">Adicionar usuário</button></div><div class="user-card-grid">${db.users.map(u=>`<button type="button" class="card user-admin-card" data-user-card="${u.id}"><div class="user-admin-card-head"><div><strong>${esc(u.name)}</strong><div class="muted">${esc(u.email||'')}</div></div><span class="badge ${u.active?'ok':'danger'}">${u.active?'Ativo':'Inativo'}</span></div><div class="user-admin-card-meta"><span><b>Setor:</b> ${esc(u.sector||u.type||'—')}</span><span><b>Função:</b> ${esc(u.type||'—')}</span></div></button>`).join('')}</div>`;
   $('#newUser').onclick=()=>userModal();
-  $$('[data-edit-user]').forEach(b=>b.onclick=()=>userModal(findUser(b.dataset.editUser)));
-  $$('[data-toggle-user]').forEach(b=>b.onclick=async()=>{
-    const u=findUser(b.dataset.toggleUser);if(!u)return;
-    const active=!u.active;
-    const r=await sb.from('profiles').update({ativo:active}).eq('id',u.id);if(r.error){alert(r.error.message);return;}
-    u.active=active;cacheDB();renderUsers();
-  });
+  $$('[data-user-card]').forEach(b=>b.onclick=()=>userModal(findUser(b.dataset.userCard)));
+}
+async function userMetaHistoryHtml(userId){
+  if(!userId)return '<div class="empty compact">O histórico ficará disponível após criar o usuário.</div>';
+  const [h,r,m]=await Promise.all([sb.from('meta_historico').select('*').eq('entidade_tipo','colaborador').eq('entidade_id',userId).order('created_at',{ascending:false}),sb.from('meta_responsaveis').select('meta_id').eq('usuario_id',userId),sb.from('metas').select('id,titulo,status,prazo,updated_at').order('updated_at',{ascending:false})]);
+  if(h.error||r.error||m.error)return '<div class="notice danger">Não foi possível carregar o histórico de metas.</div>';
+  const ids=new Set((r.data||[]).map(x=>x.meta_id));const metas=(m.data||[]).filter(x=>ids.has(x.id));const hist=h.data||[];
+  const rows=[...hist.map(x=>({when:x.created_at,title:x.meta_titulo||'Meta',status:x.acao,desc:x.descricao||''})),...metas.filter(x=>!hist.some(hh=>hh.meta_id===x.id)).map(x=>({when:x.updated_at,title:x.titulo,status:x.status,desc:x.prazo?`Prazo ${brDate(x.prazo)}`:''}))].sort((x,y)=>String(y.when||'').localeCompare(String(x.when||''))).slice(0,40);
+  return rows.length?`<div class="user-history-list">${rows.map(x=>`<div class="user-history-item"><div><strong>${esc(x.title)}</strong> <span class="badge">${esc(x.status||'')}</span></div><p>${esc(x.desc||'')}</p><small>${x.when?new Date(x.when).toLocaleString('pt-BR'):'—'}</small></div>`).join('')}</div>`:'<div class="empty compact">Nenhuma meta registrada para este usuário.</div>';
 }
 function userModal(u={}){
-  openModal(u.id?'Editar usuário':'Novo usuário',`<form id="userForm" class="form-grid"><div class="field full"><label>Nome</label><input name="name" required value="${esc(u.name||'')}"></div><div class="field"><label>CPF</label><input name="cpf" maxlength="14" value="${fmtCpf(u.cpf||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" required value="${esc(u.email||'')}" ${u.id?'readonly':''}></div>${u.id?'':`<div class="field"><label>Senha inicial</label><input name="password" type="password" required minlength="6"></div>`}<div class="field"><label>Tipo</label><select name="type" required>${USER_TYPES.map(t=>`<option ${u.type===t?'selected':''}>${t}</option>`).join('')}</select></div><div class="field"><label>Status</label><select name="active"><option value="true" ${u.active!==false?'selected':''}>Ativo</option><option value="false" ${u.active===false?'selected':''}>Inativo</option></select></div><div id="userStatus" class="field full muted"></div></form>`,()=>$('#userForm').requestSubmit());
+  openModal(u.id?'Editar usuário':'Novo usuário',`<form id="userForm" class="form-grid"><div class="field full"><label>Nome</label><input name="name" required value="${esc(u.name||'')}"></div><div class="field"><label>CPF</label><input name="cpf" maxlength="14" value="${fmtCpf(u.cpf||'')}"></div><div class="field"><label>E-mail</label><input name="email" type="email" required value="${esc(u.email||'')}"></div><div class="field"><label>${u.id?'Nova senha (opcional)':'Senha inicial'}</label><input name="password" type="password" ${u.id?'':'required'} minlength="8"></div><div class="field"><label>Setor</label><select name="sector" required>${USER_SECTORS.map(t=>`<option ${String(u.sector||u.type)===t?'selected':''}>${t}</option>`).join('')}</select></div><div class="field"><label>Função</label><select name="type" required>${USER_TYPES.map(t=>`<option ${u.type===t?'selected':''}>${t}</option>`).join('')}</select></div><div class="field"><label>Status</label><select name="active"><option value="true" ${u.active!==false?'selected':''}>Ativo</option><option value="false" ${u.active===false?'selected':''}>Inativo</option></select></div><div id="userStatus" class="field full muted"></div>${u.id?'<div class="field full"><label>Histórico de metas</label><div id="userMetaHistory"><div class="muted">Carregando histórico...</div></div></div>':''}</form>`,()=>$('#userForm').requestSubmit());
+  if(u.id)userMetaHistoryHtml(u.id).then(html=>{const el=$('#userMetaHistory');if(el)el.innerHTML=html});
   $('#userForm').onsubmit=async e=>{
     e.preventDefault();const fd=new FormData(e.target),cpf=cpfDigits(fd.get('cpf')),email=normEmail(fd.get('email')),status=$('#userStatus');
     if(cpf&&cpf.length!==11){alert('Informe um CPF com 11 dígitos ou deixe em branco.');return;}
     if(db.users.some(x=>x.id!==u.id&&normEmail(x.email)===email)){alert('E-mail já cadastrado.');return;}
     if(cpf&&db.users.some(x=>x.id!==u.id&&cpfDigits(x.cpf)===cpf)){alert('CPF já cadastrado.');return;}
-    const profile={nome:fd.get('name').trim(),cpf:cpf||null,tipo:fd.get('type'),ativo:fd.get('active')==='true'};
+    const profile={nome:fd.get('name').trim(),cpf:cpf||null,email,setor:fd.get('sector'),tipo:fd.get('type'),ativo:fd.get('active')==='true'};
     status.textContent='Salvando...';
     if(u.id){
+      const password=String(fd.get('password')||'');
+      if(email!==normEmail(u.email)||password){const {data:{session}}=await sb.auth.getSession();const ar=await fetch('/api/admin-user-password',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session?.access_token||''}`},body:JSON.stringify({userId:u.id,email:email!==normEmail(u.email)?email:undefined,password:password||undefined})});const aj=await ar.json();if(!ar.ok){status.textContent='';alert(`Não foi possível atualizar o acesso: ${aj.error||'erro desconhecido'}`);return;}}
       const r=await sb.from('profiles').update(profile).eq('id',u.id).select().single();
       if(r.error){status.textContent='';alert(r.error.message);return;}
-      Object.assign(u,{name:profile.nome,cpf:profile.cpf||'',type:profile.tipo,active:profile.ativo});
+      Object.assign(u,{name:profile.nome,cpf:profile.cpf||'',email:profile.email,sector:profile.setor,type:profile.tipo,active:profile.ativo});
     }else{
       const temp=window.supabase.createClient(SB_CONFIG.url,SB_CONFIG.publishableKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-      const signup=await temp.auth.signUp({email,password:fd.get('password'),options:{data:{nome:profile.nome,cpf:profile.cpf||'',tipo:profile.tipo}}});
+      const signup=await temp.auth.signUp({email,password:fd.get('password'),options:{data:{nome:profile.nome,cpf:profile.cpf||'',tipo:profile.tipo,setor:profile.setor}}});
       if(signup.error){status.textContent='';alert(`Não foi possível criar o usuário: ${signup.error.message}`);return;}
       const newId=signup.data.user?.id;if(!newId){status.textContent='';alert('O Supabase não retornou o identificador do usuário.');return;}
       await new Promise(r=>setTimeout(r,500));
