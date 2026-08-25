@@ -155,7 +155,37 @@ function renderActive(){
   qs('#content').innerHTML=`<div class="toolbar"><button class="btn ghost" id="metaActiveBack">← Voltar</button><div class="right">${canManageSectors()?'<button class="btn secondary" id="metaNewSector">+ Setor</button>':''}${canManageMeta()?'<button class="btn" id="metaActiveNew">+ Nova Meta</button>':''}</div></div><div class="metas-ativas-groups"><section class="card"><div class="section-head"><div><h3>Setores</h3><p class="muted">Crie, edite ou exclua setores usados na organização das metas.</p></div></div><div class="metas-group-list">${state.sectors.filter(s=>s.ativo!==false).map(s=>{const count=active.filter(m=>m.setor_id===s.id).length;return `<div class="metas-group-item sector-manage-row"><button type="button" data-filter-sector="${s.id}"><strong>${esc(s.nome)}</strong><span class="muted">${count} meta(s) ativa(s)</span></button>${canManageSectors()?`<div class="actions"><button class="btn icon secondary" data-edit-sector="${s.id}">✎</button><button class="btn icon danger" data-del-sector="${s.id}">×</button></div>`:''}</div>`}).join('')||'<div class="empty compact">Nenhum setor.</div>'}</div></section><section class="card"><h3>Metas em aberto</h3><div class="metas2-card-grid">${active.map(metaCardHtml).join('')||'<div class="empty">Nenhuma meta ativa.</div>'}</div></section></div>`;
   qs('#metaActiveBack').onclick=renderHome;qs('#metaNewSector')?.addEventListener('click',()=>sectorModal());qs('#metaActiveNew')?.addEventListener('click',()=>metaModal());wireMetaCards();qsa('[data-edit-sector]').forEach(b=>b.onclick=()=>sectorModal(state.sectors.find(s=>s.id===b.dataset.editSector)));qsa('[data-del-sector]').forEach(b=>b.onclick=()=>deleteSector(b.dataset.delSector));qsa('[data-filter-sector]').forEach(b=>b.onclick=()=>{const id=b.dataset.filterSector;qsa('.metas2-card').forEach(card=>{const m=state.metas.find(x=>x.id===card.dataset.metaCard);card.hidden=m?.setor_id!==id})});
 }
-async function sectorModal(s={}){if(B()?.refreshCore)await B().refreshCore();B().openModal(s.id?'Editar setor':'Novo setor',`<form id="metaSectorForm" class="form-grid"><div class="field full"><label>Nome do setor</label><input name="nome" required value="${esc(s.nome||'')}"></div></form>`,()=>qs('#metaSectorForm').requestSubmit());qs('#metaSectorForm').onsubmit=async e=>{e.preventDefault();const nome=new FormData(e.target).get('nome').trim();const row={id:s.id||uid(),nome,ativo:true,created_by:s.created_by||currentUser().id,updated_at:new Date().toISOString()};const r=await sb().from('meta_setores').upsert(row,{onConflict:'id'}).select().single();if(r.error){alert(r.error.message);return}if(s.id)Object.assign(s,r.data);else state.sectors.push(r.data);B().closeModal();await fetchAll();renderActive()}}
+async function sectorModal(s={}){
+  if(B()?.refreshCore)await B().refreshCore();
+  B().openModal(s.id?'Editar setor':'Novo setor',`<form id="metaSectorForm" class="form-grid"><div class="field full"><label>Nome do setor</label><input name="nome" required value="${esc(s.nome||'')}"></div></form>`,()=>qs('#metaSectorForm').requestSubmit());
+  qs('#metaSectorForm').onsubmit=async e=>{
+    e.preventDefault();
+    const nome=String(new FormData(e.target).get('nome')||'').trim();
+    if(!nome)return;
+    const client=sb();
+    const now=new Date().toISOString();
+    let r;
+    if(s.id){
+      r=await client.from('meta_setores').update({nome,ativo:true,updated_at:now}).eq('id',s.id).select().single();
+    }else{
+      const existing=await client.from('meta_setores').select('*').ilike('nome',nome).limit(1).maybeSingle();
+      if(existing.error){alert(existing.error.message);return;}
+      if(existing.data){
+        r=await client.from('meta_setores').update({nome,ativo:true,updated_at:now}).eq('id',existing.data.id).select().single();
+      }else{
+        r=await client.from('meta_setores').insert({id:uid(),nome,ativo:true,created_by:currentUser().id,updated_at:now}).select().single();
+      }
+    }
+    if(r.error){
+      if(r.error.code==='23505'||/meta_setores_nome_key|duplicate key/i.test(r.error.message||''))alert('Já existe um setor com esse nome. Se ele estava inativo, atualize a tela e tente novamente.');
+      else alert(r.error.message);
+      return;
+    }
+    B().closeModal();
+    await fetchAll();
+    renderActive();
+  };
+}
 async function deleteSector(id){const used=state.metas.some(m=>m.setor_id===id);if(used){alert('Este setor possui metas vinculadas. Edite as metas antes de excluir o setor.');return}if(!confirm('Excluir setor?'))return;const r=await sb().from('meta_setores').delete().eq('id',id);if(r.error){alert(r.error.message);return}state.sectors=state.sectors.filter(s=>s.id!==id);await fetchAll();renderActive()}
 
 function renderOrders(){
