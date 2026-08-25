@@ -1,0 +1,65 @@
+name: Fix sector source once
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-sector-source-once.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Corrigir cadastro de setores no fonte
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js')
+          s=p.read_text()
+          pattern=r"async function sectorModal\(s=\{\}\)\{.*?\nasync function deleteSector"
+          replacement='''async function sectorModal(s={}){
+  if(B()?.refreshCore)await B().refreshCore();
+  B().openModal(s.id?'Editar setor':'Novo setor',`<form id="metaSectorForm" class="form-grid"><div class="field full"><label>Nome do setor</label><input name="nome" required value="${esc(s.nome||'')}"></div></form>`,()=>qs('#metaSectorForm').requestSubmit());
+  qs('#metaSectorForm').onsubmit=async e=>{
+    e.preventDefault();
+    const nome=String(new FormData(e.target).get('nome')||'').trim();
+    if(!nome)return;
+    const client=sb();
+    const now=new Date().toISOString();
+    let r;
+    if(s.id){
+      r=await client.from('meta_setores').update({nome,ativo:true,updated_at:now}).eq('id',s.id).select().single();
+    }else{
+      const existing=await client.from('meta_setores').select('*').ilike('nome',nome).limit(1).maybeSingle();
+      if(existing.error){alert(existing.error.message);return;}
+      if(existing.data){
+        r=await client.from('meta_setores').update({nome,ativo:true,updated_at:now}).eq('id',existing.data.id).select().single();
+      }else{
+        r=await client.from('meta_setores').insert({id:uid(),nome,ativo:true,created_by:currentUser().id,updated_at:now}).select().single();
+      }
+    }
+    if(r.error){
+      if(r.error.code==='23505'||/meta_setores_nome_key|duplicate key/i.test(r.error.message||''))alert('Já existe um setor com esse nome. Atualize a tela; se ele estava inativo, será reativado ao salvar novamente.');
+      else alert(r.error.message);
+      return;
+    }
+    B().closeModal();
+    await fetchAll();
+    renderActive();
+  };
+}
+async function deleteSector'''
+          ns,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit(f'sectorModal não localizado: {n}')
+          p.write_text(ns)
+          idx=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html')
+          x=idx.read_text().replace('metas-v2.js?v=21','metas-v2.js?v=22')
+          idx.write_text(x)
+          PY
+          node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+          git config user.name "Integral ERP Source Fix"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html
+          git commit -m "fix: reativar setor existente ao cadastrar novamente" || true
+          git push
