@@ -1,0 +1,26 @@
+name: merge-metas-core
+
+on:
+  push:
+    paths:
+      - '.github/workflows/merge-metas-core.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: python .github/patch_metas_core.py
+      - run: node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+      - run: |
+          git config user.name "Integral ERP Metas Core"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/erp-bridge.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html
+          git commit -m "refactor: integrar Metas V2 ao código fonte"
+          git push origin main
