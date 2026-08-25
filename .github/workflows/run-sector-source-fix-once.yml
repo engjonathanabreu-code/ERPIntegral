@@ -1,0 +1,17 @@
+name: Run sector source fix once
+on: push
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/scripts/fix-sector-source.py
+      - run: node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js
+      - run: |
+          git config user.name "Integral ERP Source Fix"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/metas-v2.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html
+          git commit -m "fix: reativar setor existente ao cadastrar novamente" || true
+          git push
