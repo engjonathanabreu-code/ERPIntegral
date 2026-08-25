@@ -187,9 +187,28 @@ function installEntityHistoryHooks(){
   if(bridge.currentView==='plans'){qsa('.plan-card[data-plan-card-id]').forEach(card=>{if(card.querySelector('.planMetaHistoryBtn'))return;const id=card.dataset.planCardId,head=card.querySelector('.plan-head');if(!head)return;const b=document.createElement('button');b.className='btn small secondary planMetaHistoryBtn';b.textContent='Histórico de metas';b.onclick=()=>historyModal('plano',id,`Histórico de metas — ${planName(id)}`);head.appendChild(b)})}
   if(bridge.currentView==='users'){qsa('[data-edit-user]').forEach(edit=>{const row=edit.closest('tr');if(!row||row.querySelector('.userMetaHistoryBtn'))return;const id=edit.dataset.editUser,b=document.createElement('button');b.className='btn small secondary userMetaHistoryBtn';b.textContent='Histórico de metas';b.onclick=()=>historyModal('colaborador',id,`Histórico de metas — ${userName(id)}`);edit.parentElement.prepend(b)})}
 }
-const observer=new MutationObserver(()=>installEntityHistoryHooks());observer.observe(document.documentElement,{childList:true,subtree:true});
+let historyHookTimer=null;
+const observer=new MutationObserver(()=>{
+  if(historyHookTimer)return;
+  historyHookTimer=setTimeout(()=>{historyHookTimer=null;installEntityHistoryHooks();},120);
+});
+observer.observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
 
-async function render(){renderLoading();if(B()?.refreshCore)await B().refreshCore();await fetchAll();if(B()?.currentView!=='metas')return;if(state.error){renderSetupError();return;}renderCurrentScreen();installEntityHistoryHooks();}
+let renderPromise=null;
+async function render(){
+  if(renderPromise)return renderPromise;
+  renderPromise=(async()=>{
+    const firstLoad=!state.loaded;
+    if(firstLoad)renderLoading();
+    if(B()?.refreshCore)await B().refreshCore();
+    await fetchAll();
+    if(B()?.currentView!=='metas')return;
+    if(state.error){renderSetupError();return;}
+    renderCurrentScreen();
+    installEntityHistoryHooks();
+  })().finally(()=>{renderPromise=null;});
+  return renderPromise;
+}
 window.ERPMetasV2={render,refresh:render,historyModal};
 window.addEventListener('erp-bridge-ready',()=>{if(B()?.currentView==='metas')render();});
 })();
