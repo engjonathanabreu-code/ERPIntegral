@@ -34,6 +34,7 @@ let db=seed();
 let currentUser=null;
 let currentView='dashboard';
 let currentProjectId=null;
+let currentPlanDetailId=null;
 let searchTerm='';
 let openPaymentGroups={};
 let metasScreen='home';
@@ -510,10 +511,34 @@ function documentModal(){
 function renderPlans(){
   title('Planos de trabalho');
   const plans=db.plans.filter(canSeePlan);
-  $('#content').innerHTML=`${canManageCore()?'<div class="toolbar"><div></div><button id="newPlan" class="btn">Criar plano de trabalho</button></div>':''}${plans.map(planCard).join('')||'<div class="empty">Nenhum plano de trabalho disponível para este usuário.</div>'}`;
+  let active=currentPlanDetailId?plans.find(p=>p.id===currentPlanDetailId):null;
+  if(currentPlanDetailId&&!active)currentPlanDetailId=null;
+  if(active){
+    $('#content').innerHTML=`<div class="toolbar plan-detail-toolbar"><button id="backPlans" class="btn secondary">← Voltar aos planos</button><div class="right"><span class="muted">Visualização completa do plano</span></div></div>${planCard(active)}`;
+    $('#backPlans').onclick=()=>{currentPlanDetailId=null;renderPlans()};
+    wirePlanEvents();
+    return;
+  }
+  $('#content').innerHTML=`${canManageCore()?'<div class="toolbar"><div><b>Planos de trabalho</b><div class="muted">Clique em um plano para abrir todas as etapas e alimentar o trabalho.</div></div><button id="newPlan" class="btn">Criar plano de trabalho</button></div>':'<div class="toolbar"><div><b>Planos de trabalho</b><div class="muted">Clique em um plano para abrir todas as etapas.</div></div></div>'}<div class="plan-index-list">${plans.map(planSummaryRow).join('')||'<div class="empty">Nenhum plano de trabalho disponível para este usuário.</div>'}</div>`;
   if(canManageCore())$('#newPlan').onclick=()=>planModal();
+  $$('[data-open-plan]').forEach(row=>row.onclick=e=>{if(e.target.closest('[data-edit-plan],[data-del-plan]'))return;currentPlanDetailId=row.dataset.openPlan;renderPlans()});
+  $$('[data-edit-plan]').forEach(b=>b.onclick=e=>{e.stopPropagation();planModal(db.plans.find(x=>x.id===b.dataset.editPlan))});
+  $$('[data-del-plan]').forEach(b=>b.onclick=e=>{e.stopPropagation();if(confirm('Excluir plano?')){db.plans=db.plans.filter(x=>x.id!==b.dataset.delPlan);saveDB();renderPlans()}});
+}
+function planSummaryRow(p){
+  const project=findProject(p.projectId);
+  const total=p.steps.reduce((a,s)=>a+s.deliverables.length,0);
+  const done=p.steps.reduce((a,s)=>a+s.deliverables.filter(d=>d.done).length,0);
+  const pct=total?Math.round(done/total*100):0;
+  const openSteps=p.steps.filter(s=>s.status!=='Concluída');
+  const current=openSteps.length?openSteps[openSteps.length-1]:null;
+  const d=current?.deadline?daysUntil(current.deadline):null;
+  const deadlineClass=current?.deadline&&d<0?'danger':current?.deadline&&d<=7?'warn':'';
+  return `<section class="card plan-index-row" data-open-plan="${p.id}" tabindex="0" role="button"><div class="plan-index-primary"><h3>${esc(p.title)}</h3><span class="muted">${esc(project?.name||'Sem projeto')}</span></div><div class="plan-index-stage"><small>Última etapa em aberto</small>${current?`<strong>${esc(current.title)}</strong><span><span class="badge">${esc(current.status||'Pendente')}</span>${current.deadline?` <span class="badge ${deadlineClass}">Prazo ${brDate(current.deadline)}</span>`:''}</span>`:'<strong>Nenhuma etapa em aberto</strong><span class="muted">Sem pendências cadastradas</span>'}</div><div class="plan-index-progress"><small>Progresso dos entregáveis</small><strong>${pct}%</strong><div class="progress"><i style="width:${pct}%"></i></div></div><div class="plan-index-status"><span class="badge ${p.status==='Concluído'?'ok':''}">${esc(p.status)}</span><span class="plan-index-open">Abrir plano →</span></div>${canManageCore()?`<div class="actions plan-index-actions"><button class="btn icon secondary" data-edit-plan="${p.id}" title="Editar plano">✎</button><button class="btn icon danger" data-del-plan="${p.id}" title="Excluir plano">×</button></div>`:''}</section>`;
+}
+function wirePlanEvents(){
   $$('[data-edit-plan]').forEach(b=>b.onclick=()=>planModal(db.plans.find(x=>x.id===b.dataset.editPlan)));
-  $$('[data-del-plan]').forEach(b=>b.onclick=()=>{if(confirm('Excluir plano?')){db.plans=db.plans.filter(x=>x.id!==b.dataset.delPlan);saveDB();renderPlans()}});
+  $$('[data-del-plan]').forEach(b=>b.onclick=()=>{if(confirm('Excluir plano?')){const deleted=b.dataset.delPlan;db.plans=db.plans.filter(x=>x.id!==deleted);if(currentPlanDetailId===deleted)currentPlanDetailId=null;saveDB();renderPlans()}});
   $$('[data-add-step]').forEach(b=>b.onclick=()=>stepModal(db.plans.find(x=>x.id===b.dataset.addStep)));
   $$('[data-edit-step]').forEach(b=>{b.onclick=()=>{const p=db.plans.find(x=>x.id===b.dataset.plan);stepModal(p,p.steps.find(x=>x.id===b.dataset.editStep))}});
   $$('[data-del-step]').forEach(b=>b.onclick=()=>{const p=db.plans.find(x=>x.id===b.dataset.plan);if(confirm('Excluir etapa?')){p.steps=p.steps.filter(x=>x.id!==b.dataset.delStep);saveDB();renderPlans()}});
