@@ -760,13 +760,12 @@ function userModal(u={}){
       if(r.error){status.textContent='';alert(r.error.message);return;}
       Object.assign(u,{name:profile.nome,cpf:profile.cpf||'',email:profile.email,sector:profile.setor,type:profile.tipo,active:profile.ativo});
     }else{
-      const temp=window.supabase.createClient(SB_CONFIG.url,SB_CONFIG.publishableKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-      const signup=await temp.auth.signUp({email,password:fd.get('password'),options:{data:{nome:profile.nome,cpf:profile.cpf||'',tipo:profile.tipo,setor:profile.setor}}});
-      if(signup.error){status.textContent='';alert(`Não foi possível criar o usuário: ${signup.error.message}`);return;}
-      const newId=signup.data.user?.id;if(!newId){status.textContent='';alert('O Supabase não retornou o identificador do usuário.');return;}
-      await new Promise(r=>setTimeout(r,500));
-      const pr=await sb.from('profiles').update(profile).eq('id',newId).select().maybeSingle();
-      if(pr.error){status.textContent='';alert(`Usuário criado, mas o perfil não pôde ser atualizado: ${pr.error.message}`);return;}
+      const {data:{session}}=await sb.auth.getSession();
+      if(!session?.access_token){status.textContent='';alert('Sua sessão expirou. Entre novamente no ERP.');return;}
+      const createR=await fetch('/api/admin-user-create',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({email,password:fd.get('password'),nome:profile.nome,cpf:profile.cpf||'',tipo:profile.tipo,setor:profile.setor})});
+      const createData=await createR.json().catch(()=>({}));
+      if(!createR.ok){status.textContent='';alert(`Não foi possível criar o usuário: ${createData.error||'erro desconhecido'}`);return;}
+      const newId=createData.userId;if(!newId){status.textContent='';alert('O servidor não retornou o identificador do usuário.');return;}
       db.users.push({id:newId,name:profile.nome,cpf:profile.cpf||'',email,type:profile.tipo,active:profile.ativo,createdAt:today()});
     }
     cacheDB();closeModal();renderUsers();
