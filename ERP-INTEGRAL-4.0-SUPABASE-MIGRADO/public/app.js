@@ -488,8 +488,25 @@ function paymentModal(x={},afterSave){
 
 function renderDocuments(){
   title('Documentos');
-  $('#content').innerHTML=`<div class="toolbar"><div></div><button id="newDocument" class="btn">Enviar documento</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Arquivo</th><th>Projeto</th><th>Data</th><th></th></tr></thead><tbody>${db.documents.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(findProject(d.projectId)?.name||'—')}</td><td>${brDate(d.createdAt)}</td><td class="actions"><button class="btn small secondary" data-download-doc="${d.id}">Baixar</button>${isAdmin()?`<button class="btn icon danger" data-del-doc="${d.id}">×</button>`:''}</td></tr>`).join('')||'<tr><td colspan="4">Nenhum documento enviado.</td></tr>'}</tbody></table></div>`;
+  const collapseKey='erp_integral_documents_groups_collapsed';
+  let collapsed={};try{collapsed=JSON.parse(localStorage.getItem(collapseKey)||'{}')}catch{}
+  const groups=new Map();
+  db.documents.forEach(d=>{
+    const p=findProject(d.projectId);
+    const key=p?.id||'sem-projeto';
+    if(!groups.has(key))groups.set(key,{id:key,name:p?.name||'Sem projeto vinculado',docs:[]});
+    groups.get(key).docs.push(d);
+  });
+  const ordered=[...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{sensitivity:'base'}));
+  const groupHtml=ordered.map(g=>{
+    const isCollapsed=!!collapsed[g.id];
+    const latest=g.docs.reduce((max,d)=>!max||String(d.createdAt||'')>String(max||'')?d.createdAt:max,'');
+    const rows=[...g.docs].sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))||a.name.localeCompare(b.name,'pt-BR')).map(d=>`<tr><td><div class="document-name-cell"><span class="document-file-icon">↧</span><span>${esc(d.name)}</span></div></td><td>${brDate(d.createdAt)}</td><td class="actions"><button class="btn small secondary" data-download-doc="${d.id}">Baixar</button>${isAdmin()?`<button class="btn icon danger" data-del-doc="${d.id}" title="Excluir documento">×</button>`:''}</td></tr>`).join('');
+    return `<section class="documents-project-group ${isCollapsed?'collapsed':''}" data-doc-group="${esc(g.id)}"><button type="button" class="documents-project-head" data-toggle-doc-group="${esc(g.id)}" aria-expanded="${isCollapsed?'false':'true'}"><div class="documents-project-title"><span class="documents-project-chevron">⌄</span><div><strong>${esc(g.name)}</strong><small>${g.docs.length} documento${g.docs.length===1?'':'s'}${latest?` · mais recente em ${brDate(latest)}`:''}</small></div></div><span class="documents-project-count">${g.docs.length}</span></button><div class="documents-project-body"><div class="table-wrap documents-table-wrap"><table class="table documents-table"><thead><tr><th>Arquivo</th><th>Data</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
+  }).join('');
+  $('#content').innerHTML=`<div class="toolbar documents-toolbar"><div><div class="documents-summary"><strong>${ordered.length}</strong><span>projeto${ordered.length===1?'':'s'} com documentos</span><i></i><strong>${db.documents.length}</strong><span>arquivo${db.documents.length===1?'':'s'}</span></div></div><button id="newDocument" class="btn">Enviar documento</button></div><div class="documents-groups">${groupHtml||'<div class="empty">Nenhum documento enviado.</div>'}</div>`;
   $('#newDocument').onclick=documentModal;
+  $$('[data-toggle-doc-group]').forEach(b=>b.onclick=()=>{const id=b.dataset.toggleDocGroup;collapsed[id]=!collapsed[id];try{localStorage.setItem(collapseKey,JSON.stringify(collapsed))}catch{}renderDocuments()});
   $$('[data-download-doc]').forEach(b=>b.onclick=async()=>{
     const d=db.documents.find(x=>x.id===b.dataset.downloadDoc);if(!d)return;
     const {data,error}=await sb.storage.from('documentos').createSignedUrl(d.path,60);
