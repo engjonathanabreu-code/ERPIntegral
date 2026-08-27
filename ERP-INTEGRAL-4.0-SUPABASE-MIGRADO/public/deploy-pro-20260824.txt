@@ -1,2 +1,3 @@
 ERP Integral — deploy marker
 Consolidacao final do codigo fonte publicada em 25/08/2026.
+Regras finais de acesso por setor e funcao publicadas em 27/08/2026.
