@@ -1,0 +1,106 @@
+/* Plano de trabalho — hierarquia visual das etapas */
+.plan-card{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  padding:20px;
+}
+.plan-card>.plan-head{display:contents}
+.plan-card>.plan-head>div:first-child{
+  order:0;
+  padding:0 0 15px;
+  border-bottom:1px solid var(--line);
+  margin-bottom:12px;
+}
+.plan-card>.plan-head>div:first-child h3{margin:0 0 8px;color:var(--primary);font-size:20px}
+.plan-card>.plan-head>.actions{
+  order:50;
+  margin-top:18px;
+  padding-top:16px;
+  border-top:1px solid var(--line);
+  justify-content:flex-end;
+}
+.plan-card>.plan-head>.actions .btn{
+  width:auto;
+  height:auto;
+  min-width:94px;
+  padding:8px 12px;
+}
+.plan-card>.plan-head>.actions .btn.secondary::after{content:' Editar plano';font-size:12px;font-weight:800}
+.plan-card>.plan-head>.actions .btn.danger::after{content:' Excluir plano';font-size:12px;font-weight:800}
+.plan-card>.progress{order:1;margin:0 0 18px;height:8px}
+.plan-card>.step{order:10}
+.plan-card>div[style*="margin-top"]{order:40;margin-top:16px!important}
+
+.plan-card .step{
+  position:relative;
+  margin:0 0 16px;
+  padding:0;
+  border:1px solid #cfdedc;
+  border-left:5px solid var(--primary-2);
+  border-radius:15px;
+  background:#fff;
+  overflow:hidden;
+  box-shadow:0 5px 16px rgba(15,95,91,.055);
+}
+.plan-card .step:last-of-type{margin-bottom:0}
+.plan-card .step.readonly{opacity:1;border-left-color:#9aadaa}
+.plan-card .step-top{
+  padding:15px 16px 13px;
+  background:#f7faf9;
+  border-bottom:1px solid var(--line);
+  align-items:flex-start;
+}
+.plan-card .step-title{
+  color:#173c39;
+  font-size:16px;
+  line-height:1.35;
+}
+.plan-card .step-top .muted{display:block;margin-top:4px;font-size:11.5px}
+.plan-card .step-top>.actions{flex:0 0 auto}
+.plan-card .step-info{
+  margin:0;
+  padding:14px 14px 0;
+  gap:10px;
+}
+.plan-card .info-box{
+  background:#f2f7f6;
+  border:1px solid #e3eeec;
+  border-radius:10px;
+  padding:10px 11px;
+  min-height:54px;
+}
+.plan-card .info-box b{font-size:11px;text-transform:uppercase;letter-spacing:.025em;margin-bottom:5px}
+.plan-card .step>.field,
+.plan-card .step>.deliverables{
+  margin:0;
+  padding:13px 14px 0;
+}
+.plan-card .step>.field:last-child{padding-bottom:15px}
+.plan-card .step>.field label,
+.plan-card .step>.deliverables>b{
+  color:#3f5e5b;
+  font-size:12px;
+  font-weight:800;
+  margin-bottom:7px;
+  display:block;
+}
+.plan-card .step select,
+.plan-card .step textarea{
+  border-color:#cfdfdd;
+  background:#fff;
+}
+.plan-card .step textarea{min-height:78px}
+.plan-card .deliverable{
+  padding:9px 4px;
+  border-bottom:1px solid #e5efed;
+}
+.plan-card .deliverable.done span{color:#758783;text-decoration-color:#899a97}
+.plan-card .step:has(select option:checked[value="Concluída"]){border-left-color:#3f9a70}
+
+@media(max-width:720px){
+  .plan-card{padding:14px}
+  .plan-card .step-info{grid-template-columns:1fr}
+  .plan-card>.plan-head>.actions{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .plan-card>.plan-head>.actions .btn{width:100%}
+}
