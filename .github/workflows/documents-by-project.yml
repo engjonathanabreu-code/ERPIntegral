@@ -1,0 +1,91 @@
+name: Organizar documentos por projeto
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/documents-by-project.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Atualizar código-fonte do ERP
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          app=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js')
+          s=app.read_text()
+          start=s.index('function renderDocuments(){')
+          end=s.index('function documentModal(){', start)
+          new=r'''function renderDocuments(){
+  title('Documentos');
+  const collapseKey='erp_integral_documents_groups_collapsed';
+  let collapsed={};try{collapsed=JSON.parse(localStorage.getItem(collapseKey)||'{}')}catch{}
+  const groups=new Map();
+  db.documents.forEach(d=>{
+    const p=findProject(d.projectId);
+    const key=p?.id||'sem-projeto';
+    if(!groups.has(key))groups.set(key,{id:key,name:p?.name||'Sem projeto vinculado',docs:[]});
+    groups.get(key).docs.push(d);
+  });
+  const ordered=[...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{sensitivity:'base'}));
+  const groupHtml=ordered.map(g=>{
+    const isCollapsed=!!collapsed[g.id];
+    const latest=g.docs.reduce((max,d)=>!max||String(d.createdAt||'')>String(max||'')?d.createdAt:max,'');
+    const rows=[...g.docs].sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))||a.name.localeCompare(b.name,'pt-BR')).map(d=>`<tr><td><div class="document-name-cell"><span class="document-file-icon">↧</span><span>${esc(d.name)}</span></div></td><td>${brDate(d.createdAt)}</td><td class="actions"><button class="btn small secondary" data-download-doc="${d.id}">Baixar</button>${isAdmin()?`<button class="btn icon danger" data-del-doc="${d.id}" title="Excluir documento">×</button>`:''}</td></tr>`).join('');
+    return `<section class="documents-project-group ${isCollapsed?'collapsed':''}" data-doc-group="${esc(g.id)}"><button type="button" class="documents-project-head" data-toggle-doc-group="${esc(g.id)}" aria-expanded="${isCollapsed?'false':'true'}"><div class="documents-project-title"><span class="documents-project-chevron">⌄</span><div><strong>${esc(g.name)}</strong><small>${g.docs.length} documento${g.docs.length===1?'':'s'}${latest?` · mais recente em ${brDate(latest)}`:''}</small></div></div><span class="documents-project-count">${g.docs.length}</span></button><div class="documents-project-body"><div class="table-wrap documents-table-wrap"><table class="table documents-table"><thead><tr><th>Arquivo</th><th>Data</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
+  }).join('');
+  $('#content').innerHTML=`<div class="toolbar documents-toolbar"><div><div class="documents-summary"><strong>${ordered.length}</strong><span>projeto${ordered.length===1?'':'s'} com documentos</span><i></i><strong>${db.documents.length}</strong><span>arquivo${db.documents.length===1?'':'s'}</span></div></div><button id="newDocument" class="btn">Enviar documento</button></div><div class="documents-groups">${groupHtml||'<div class="empty">Nenhum documento enviado.</div>'}</div>`;
+  $('#newDocument').onclick=documentModal;
+  $$('[data-toggle-doc-group]').forEach(b=>b.onclick=()=>{const id=b.dataset.toggleDocGroup;collapsed[id]=!collapsed[id];try{localStorage.setItem(collapseKey,JSON.stringify(collapsed))}catch{}renderDocuments()});
+  $$('[data-download-doc]').forEach(b=>b.onclick=async()=>{
+    const d=db.documents.find(x=>x.id===b.dataset.downloadDoc);if(!d)return;
+    const {data,error}=await sb.storage.from('documentos').createSignedUrl(d.path,60);
+    if(error){alert(`Não foi possível abrir o documento: ${error.message}`);return;}
+    window.open(data.signedUrl,'_blank','noopener');
+  });
+  $$('[data-del-doc]').forEach(b=>b.onclick=async()=>{
+    const d=db.documents.find(x=>x.id===b.dataset.delDoc);if(!d||!confirm('Excluir documento?'))return;
+    const sr=await sb.storage.from('documentos').remove([d.path]);if(sr.error){alert(sr.error.message);return;}
+    const rr=await sb.from('documentos').delete().eq('id',d.id);if(rr.error){alert(rr.error.message);return;}
+    db.documents=db.documents.filter(x=>x.id!==d.id);cacheDB();renderDocuments();
+  });
+}
+'''
+          s=s[:start]+new+s[end:]
+          app.write_text(s)
+
+          css=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css')
+          c=css.read_text()
+          marker='/* DOCUMENTOS_POR_PROJETO_V1 */'
+          block=r'''
+
+/* DOCUMENTOS_POR_PROJETO_V1 */
+.documents-toolbar{margin-bottom:16px;align-items:center}.documents-summary{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}.documents-summary strong{color:var(--primary);font-size:14px}.documents-summary i{width:1px;height:16px;background:var(--line);margin:0 3px}.documents-groups{display:grid;gap:12px}.documents-project-group{background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:0 5px 18px rgba(15,95,91,.06);transition:.16s ease}.documents-project-group:hover{border-color:#c3dcd9}.documents-project-head{width:100%;border:0;background:#fff;padding:15px 17px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;color:var(--text)}.documents-project-head:hover{background:#f8fbfa}.documents-project-title{display:flex;align-items:center;gap:12px;min-width:0}.documents-project-title>div{min-width:0}.documents-project-title strong{display:block;color:var(--primary);font-size:15px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.documents-project-title small{display:block;color:var(--muted);font-size:11.5px;margin-top:4px}.documents-project-chevron{width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:#edf6f5;color:var(--primary);font-size:16px;transition:transform .16s ease;flex:0 0 auto}.documents-project-count{min-width:30px;height:28px;padding:0 9px;border-radius:999px;background:#e8f2f1;color:var(--primary);font-size:12px;font-weight:800;display:grid;place-items:center}.documents-project-body{border-top:1px solid var(--line);background:#fcfefe}.documents-project-group.collapsed .documents-project-body{display:none}.documents-project-group.collapsed .documents-project-chevron{transform:rotate(-90deg)}.documents-table-wrap{border:0;border-radius:0;background:transparent}.documents-table{min-width:560px}.documents-table th{background:#f6faf9}.documents-table td{vertical-align:middle}.documents-table th:first-child,.documents-table td:first-child{width:100%}.documents-table th:nth-child(2),.documents-table td:nth-child(2){width:130px;white-space:nowrap}.document-name-cell{display:flex;align-items:center;gap:9px;min-width:0}.document-name-cell>span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.document-file-icon{width:28px;height:28px;border-radius:8px;background:#edf6f5;color:var(--primary);display:grid;place-items:center;font-weight:900;flex:0 0 auto}.documents-table .actions{padding-right:14px}@media(max-width:720px){.documents-toolbar{align-items:stretch}.documents-toolbar>.btn{width:100%}.documents-summary{flex-wrap:wrap}.documents-project-head{padding:13px}.documents-project-title strong{white-space:normal}.documents-project-title small{line-height:1.35}.documents-table{min-width:500px}}
+'''
+          if marker in c:
+              c=c[:c.index(marker)].rstrip()+block
+          else:
+              c=c.rstrip()+block
+          css.write_text(c)
+
+          idx=Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html')
+          t=idx.read_text().replace('styles.css?v=22','styles.css?v=23').replace('styles.css?v=21','styles.css?v=23').replace('styles.css?v=20','styles.css?v=23').replace('app.js?v=20','app.js?v=23').replace('app.js?v=21','app.js?v=23').replace('app.js?v=22','app.js?v=23')
+          idx.write_text(t)
+          PY
+          node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+      - name: Gravar alteração definitiva
+        run: |
+          rm -f .github/workflows/documents-by-project.yml
+          git config user.name "Integral ERP"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/styles.css ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/index.html .github/workflows/documents-by-project.yml
+          git commit -m "feat: agrupa documentos por projeto"
+          git push
