@@ -327,15 +327,39 @@ function renderDashboard(){
   <h3 class="section-title">Projetos por tipo</h3><div class="grid cols-3">${SERVICE_TYPES.map(t=>`<div class="card metric"><h3>${t}</h3><b>${db.projects.filter(p=>p.type===t).length}</b></div>`).join('')}</div>`;
 }
 
+const PROGRESS_GROUPS_STORAGE='erp_integral_progress_groups_collapsed';
+function progressGroupState(){try{return JSON.parse(localStorage.getItem(PROGRESS_GROUPS_STORAGE)||'{}')}catch{return {}}}
+function setProgressGroupCollapsed(key,value){const state=progressGroupState();state[key]=value;try{localStorage.setItem(PROGRESS_GROUPS_STORAGE,JSON.stringify(state))}catch{}}
+function projectPlanProgress(p){
+  const plan=db.plans.find(x=>x.projectId===p.id);
+  const total=plan?.steps.length||0;
+  const done=plan?.steps.filter(s=>s.status==='Concluída').length||0;
+  const pct=total?Math.round(done/total*100):0;
+  return {plan,total,done,pct};
+}
 function renderProgress(){
   title('Andamentos dos projetos');
-  const q=searchTerm.toLowerCase();
-  const rows=db.projects.filter(p=>!q||p.name.toLowerCase().includes(q)).map(p=>{
-    const plan=db.plans.find(x=>x.projectId===p.id);const total=plan?.steps.length||0;const done=plan?.steps.filter(s=>s.status==='Concluída').length||0;const pct=total?Math.round(done/total*100):0;
-    return `<tr><td><button class="project-link" data-project="${p.id}">${esc(p.name)}</button></td><td>${esc(p.type)}</td><td>${esc(p.status||'Ativo')}</td><td>${done}/${total}</td><td><div class="progress"><i style="width:${pct}%"></i></div><span class="muted">${pct}%</span></td></tr>`
+  const q=searchTerm.trim().toLowerCase();
+  const filtered=db.projects.filter(p=>!q||(`${p.name} ${p.type||''} ${p.status||''}`).toLowerCase().includes(q));
+  const collapsed=progressGroupState();
+  const groups={};
+  filtered.forEach(p=>{
+    const type=p.type||'OUTROS';
+    const info=projectPlanProgress(p);
+    (groups[type]??=[]).push({p,...info});
+  });
+  Object.values(groups).forEach(list=>list.sort((a,b)=>b.pct-a.pct||b.done-a.done||b.total-a.total||projectProgress(b.p)-projectProgress(a.p)||a.p.name.localeCompare(b.p.name,'pt-BR',{sensitivity:'base'})));
+  const typeOrder=[...SERVICE_TYPES,...Object.keys(groups).filter(t=>!SERVICE_TYPES.includes(t)).sort((a,b)=>a.localeCompare(b,'pt-BR'))];
+  const sections=typeOrder.filter(t=>groups[t]?.length).map(type=>{
+    const list=groups[type];
+    const isCollapsed=!!collapsed[type];
+    const leader=list[0];
+    const avg=list.length?Math.round(list.reduce((sum,x)=>sum+x.pct,0)/list.length):0;
+    return `<section class="progress-type-group ${isCollapsed?'collapsed':''}" data-progress-group="${esc(type)}"><button type="button" class="progress-type-head" data-toggle-progress-group="${esc(type)}" aria-expanded="${isCollapsed?'false':'true'}"><div class="progress-type-title"><span class="progress-type-chevron">⌄</span><div><strong>${esc(type)}</strong><small>${list.length} projeto${list.length===1?'':'s'} · média ${avg}%</small></div></div><div class="progress-type-highlight"><span>Mais adiantado</span><b>${esc(leader.p.name)}</b><em>${leader.pct}%</em></div></button><div class="progress-type-body"><div class="table-wrap progress-type-table-wrap"><table class="table progress-table"><thead><tr><th>Projeto</th><th>Status</th><th>Etapas</th><th>Progresso</th></tr></thead><tbody>${list.map(({p,total,done,pct})=>`<tr><td><button class="project-link" data-project="${p.id}">${esc(p.name)}</button></td><td>${statusBadge(p.status||'Ativo')}</td><td><span class="progress-stage-count">${done}/${total}</span></td><td><div class="progress-cell"><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div></td></tr>`).join('')}</tbody></table></div></div></section>`;
   }).join('');
-  $('#content').innerHTML=`<div class="toolbar"><div class="left"><input id="searchProgress" class="search" placeholder="Buscar projeto pelo nome" value="${esc(searchTerm)}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Projeto</th><th>Tipo</th><th>Status</th><th>Etapas</th><th>Progresso</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Nenhum projeto encontrado.</td></tr>'}</tbody></table></div>`;
+  $('#content').innerHTML=`<div class="toolbar progress-toolbar"><div class="left"><input id="searchProgress" class="search" placeholder="Buscar por projeto, tipo ou status" value="${esc(searchTerm)}"></div><div class="right"><span class="muted">Dentro de cada tipo, os projetos mais adiantados aparecem primeiro.</span></div></div><div class="progress-type-groups">${sections||'<div class="empty">Nenhum projeto encontrado.</div>'}</div>`;
   $('#searchProgress').oninput=e=>{searchTerm=e.target.value;renderProgress()};
+  $$('[data-toggle-progress-group]').forEach(b=>b.onclick=()=>{const key=b.dataset.toggleProgressGroup;setProgressGroupCollapsed(key,!progressGroupState()[key]);renderProgress()});
   $$('[data-project]').forEach(b=>b.onclick=()=>{currentProjectId=b.dataset.project;currentView='projects';renderApp()});
 }
 
