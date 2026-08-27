@@ -1,0 +1,33 @@
+name: Ajuste final de acessos ERP
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/patch_access_roles_final.py
+      - .github/workflows/access-rules-final.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Aplicar regras no código fonte
+        run: python3 .github/patch_access_roles_final.py
+      - name: Validar JavaScript e build
+        run: |
+          node --check ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+          cd ERP-INTEGRAL-4.0-SUPABASE-MIGRADO && npm run build
+      - name: Gravar alteração definitiva
+        run: |
+          rm -f .github/patch_access_roles_final.py .github/workflows/access-rules-final.yml
+          git config user.name "Integral ERP Refactor"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js .github/patch_access_roles_final.py .github/workflows/access-rules-final.yml
+          git commit -m "feat: finaliza regras de acesso por setor e funcao"
+          git push
