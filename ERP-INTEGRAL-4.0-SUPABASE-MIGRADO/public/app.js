@@ -5,9 +5,9 @@ window.ERP_METAS_IN_CORE=true;
 const APP_KEY='erp_integral_v2_db';
 const SESSION_KEY='erp_integral_v2_session';
 const SERVICE_TYPES=['REURB PRIVADO','REURB LICITADO','ETSA','ETSA + ORTOFOTO','OUTROS'];
-const USER_TYPES=['Administrador','Comercial','Financeiro','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico'];
-const USER_SECTORS=['Administrativo','Comercial','Financeiro','Projetos','Topografia','Marketing','Pós-protocolo','Atendimentos'];
-const METAS_SECTORS=['Projetos','Topografia','Pós-protocolo','Atendimentos'];
+const USER_TYPES=['Administrador','Comercial','Financeiro','Projetos','Topografia','Jurídico','Marketing','Pós-protocolo','Atendimentos','Diretor Técnico','Diretor de Projetos'];
+const USER_SECTORS=['Administrativo','Comercial','Financeiro','Projetos','Topografia','Jurídico','Marketing','Pós-protocolo','Atendimentos'];
+const METAS_SECTORS=['Projetos','Topografia','Pós-protocolo','Jurídico','Atendimentos'];
 const PLAN_STATUS_COLUMNS=['Planejamento','Em andamento','Concluído','Cancelado'];
 const WEEKDAY_LABELS=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const STATES=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
@@ -67,12 +67,15 @@ function findUser(id){return db.users.find(u=>u.id===id);}
 function findProject(id){return db.projects.find(p=>p.id===id);}
 function findClient(id){return db.clients.find(c=>c.id===id);}
 function isTechDirector(){return currentUser?.type==='Diretor Técnico';}
-function isMetasManager(){return isAdmin()||isTechDirector();}
-function canSeePlan(plan){return canManageCore()||isTechDirector()||plan.steps.some(s=>s.responsibleIds.includes(currentUser.id));}
+function isProjectDirector(){return ['Diretor de Projetos','Diretor de Projeto'].includes(currentUser?.type);}
+function isFinanceAccess(){return currentUser?.type==='Financeiro'||currentUser?.sector==='Financeiro';}
+function isProjectAccessManager(){return isProjectDirector()||isFinanceAccess();}
+function isMetasManager(){return isAdmin()||isTechDirector()||isProjectDirector();}
+function canSeePlan(plan){return canManageCore()||isTechDirector()||isProjectAccessManager()||plan.steps.some(s=>s.responsibleIds.includes(currentUser.id));}
 function canEditStep(step){return isAdmin()||isTechDirector()||step.responsibleIds.includes(currentUser.id);}
-function isMetasSector(){return METAS_SECTORS.includes(currentUser?.type);}
-function canSeeMetas(){return isMetasManager()||isMetasSector();}
-function metasScopeUsers(){return db.users.filter(u=>u.active&&METAS_SECTORS.includes(u.type));}
+function isMetasSector(){return METAS_SECTORS.includes(currentUser?.type)||METAS_SECTORS.includes(currentUser?.sector);}
+function canSeeMetas(){return isMetasManager()||isProjectAccessManager()||isMetasSector();}
+function metasScopeUsers(){return db.users.filter(u=>u.active&&(METAS_SECTORS.includes(u.type)||METAS_SECTORS.includes(u.sector)));}
 function stepsForUser(userId){return db.plans.flatMap(p=>p.steps.filter(s=>s.responsibleIds.includes(userId)).map(s=>({...s,planId:p.id,planTitle:p.title,planStatus:p.status})));}
 function metasKpis(steps){
   const open=steps.filter(s=>s.status!=='Concluída');
@@ -260,7 +263,7 @@ function renderLogin(initialError=''){
 
 const ADMIN_NAV=[['dashboard','Visão geral'],['progress','Andamentos'],['clients','Clientes'],['projects','Projetos'],['payments','Financeiro'],['documents','Documentos'],['plans','Planos de trabalho'],['metas','Metas'],['users','Usuários']];
 const COMERCIAL_NAV=[['clients','Clientes'],['projects','Projetos'],['plans','Planos de trabalho']];
-function navItems(){if(isAdmin())return ADMIN_NAV;if(isComercial())return COMERCIAL_NAV;if(isTechDirector())return [['metas','Metas']];if(isMetasSector())return [['plans','Planos de trabalho'],['metas','Metas']];return [['plans','Planos de trabalho']];}
+function navItems(){if(isAdmin())return ADMIN_NAV;if(isComercial())return COMERCIAL_NAV;if(isProjectAccessManager())return [['projects','Projetos'],['plans','Planos de trabalho'],['metas','Metas']];if(isTechDirector())return [['metas','Metas']];if(isMetasSector())return [['plans','Planos de trabalho'],['metas','Metas']];return [['plans','Planos de trabalho']];}
 
 async function changeOwnPassword(){
   openModal('Alterar minha senha',`<form id="ownPasswordForm" class="form-grid"><div class="field full"><label>Nova senha</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div><div class="field full"><label>Confirmar nova senha</label><input name="confirm" type="password" autocomplete="new-password" minlength="8" required></div><div id="ownPasswordStatus" class="field full muted">Use pelo menos 8 caracteres.</div></form>`,()=>$('#ownPasswordForm').requestSubmit());
@@ -807,7 +810,7 @@ const canManageMeta=()=>isType('Administrador','Diretor Técnico','Diretor de Pr
 const canManageOS=()=>isType('Administrador','Diretor de Projetos','Pós-protocolo','Pós Protocolo');
 const canManageSectors=()=>canManageMeta();
 const normRole=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-function allowedProfessional(u){const t=normRole(u?.type||u?.role||'');return t.includes('projet')||t.includes('topografia')||t.includes('pos protocolo');}
+function allowedProfessional(u){const t=normRole(u?.type||u?.role||''),s=normRole(u?.sector||'');return t.includes('projet')||t.includes('topografia')||t.includes('pos protocolo')||t.includes('juridico')||s.includes('projet')||s.includes('topografia')||s.includes('pos protocolo')||s.includes('juridico');}
 const isMetaApprover=()=>['administrador','diretor tecnico','diretor de projetos'].includes(normRole(roleName()));
 const isMetaResponsible=m=>metaResponsibles(m.id).includes(currentUser()?.id);
 const isPendingApproval=m=>normRole(m?.status)==='aguardando aprovacao';
