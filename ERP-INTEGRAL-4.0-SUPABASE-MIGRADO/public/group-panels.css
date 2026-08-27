@@ -1,0 +1,154 @@
+/* Sistema visual canônico para agrupadores recolhíveis do ERP.
+   Usado por Andamentos, Projetos, Financeiro e Documentos. */
+
+:root{
+  --group-surface:#fff;
+  --group-surface-hover:#f8fbfa;
+  --group-soft:#edf6f5;
+  --group-pill:#e8f2f1;
+  --group-border:var(--line);
+  --group-radius:15px;
+  --group-shadow:0 5px 18px rgba(15,95,91,.06);
+}
+
+/* Ritmo e estrutura compartilhados */
+.documents-groups,
+.progress-type-groups{
+  display:grid;
+  gap:12px;
+}
+
+.documents-project-group,
+.progress-type-group,
+.project-group,
+.payment-group.card{
+  background:var(--group-surface);
+  border:1px solid var(--group-border);
+  border-radius:var(--group-radius);
+  box-shadow:var(--group-shadow);
+  overflow:hidden;
+  margin:0 0 12px;
+  padding:0;
+  transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease;
+}
+
+.documents-project-group:hover,
+.progress-type-group:hover,
+.project-group:hover,
+.payment-group.card:hover{
+  border-color:#c3dcd9;
+}
+
+/* Cabeçalhos: mesma geometria da aba Documentos */
+.documents-project-head,
+.progress-type-head,
+.project-group-toggle,
+.payment-group-toggle{
+  width:100%;
+  min-height:66px;
+  border:0;
+  background:var(--group-surface);
+  padding:15px 17px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  text-align:left;
+  color:var(--text);
+  border-radius:0;
+  box-shadow:none;
+}
+
+.documents-project-head:hover,
+.progress-type-head:hover,
+.project-group-toggle:hover,
+.payment-group-toggle:hover{
+  background:var(--group-surface-hover);
+}
+
+/* Andamentos */
+.progress-toolbar{margin-bottom:16px}
+.progress-type-head{background:var(--group-surface)}
+.progress-type-title{display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+.progress-type-title>div{min-width:0;display:block}
+.progress-type-title strong{display:block;color:var(--primary);font-size:15px;line-height:1.25;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.progress-type-title small{display:block;color:var(--muted);font-size:11.5px;font-weight:400;margin-top:4px}
+.progress-type-chevron{
+  width:28px;height:28px;display:grid;place-items:center;flex:0 0 auto;
+  border-radius:8px;background:var(--group-soft);color:var(--primary);font-size:16px;
+  transition:transform .16s ease;
+}
+.progress-type-highlight{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:48%}
+.progress-type-highlight span{font-size:10px;text-transform:none;letter-spacing:0;color:var(--muted);font-weight:600;white-space:nowrap}
+.progress-type-highlight b{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.progress-type-highlight em{font-style:normal;min-width:38px;height:28px;padding:0 9px;border-radius:999px;background:var(--group-pill);color:var(--primary);font-size:12px;font-weight:800;display:grid;place-items:center;white-space:nowrap}
+.progress-type-body{border-top:1px solid var(--group-border);background:#fcfefe}
+.progress-type-table-wrap{border:0;border-radius:0;background:transparent}
+.progress-type-group.collapsed .progress-type-body{display:none}
+.progress-type-group.collapsed .progress-type-chevron{transform:rotate(-90deg)}
+
+/* Projetos */
+.project-group{margin-bottom:12px}
+.project-group>.group-title{
+  margin:0;padding:0;background:transparent;border:0;border-radius:0;
+  color:inherit;font-weight:inherit;
+}
+.project-group-toggle{justify-content:flex-start}
+.project-group-toggle .chev{
+  order:0;float:none;width:28px;height:28px;padding:0;margin:0;display:grid;place-items:center;
+  flex:0 0 auto;border-radius:8px;background:var(--group-soft);color:var(--primary);
+  font-size:16px;font-weight:700;transition:transform .16s ease;
+}
+.project-group-toggle>span:nth-child(2){
+  order:1;min-width:0;flex:1;color:var(--primary);font-size:15px;font-weight:800;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.project-group-toggle>span:last-child{
+  order:2;float:none;min-width:30px;height:28px;padding:0 9px;margin:0;border-radius:999px;
+  background:var(--group-pill);color:var(--primary);font-size:12px;font-weight:800;
+  display:grid;place-items:center;
+}
+.project-group>.table-wrap{border:0;border-top:1px solid var(--group-border);border-radius:0;background:#fcfefe}
+.project-group.collapsed>.table-wrap{display:none}
+.project-group.collapsed .project-group-toggle .chev{transform:rotate(-90deg)}
+
+/* Financeiro */
+.payment-group-toggle>div{min-width:0;flex:1}
+.payment-group-toggle h3{margin:0;color:var(--primary);font-size:15px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.payment-group-toggle .muted{display:block;margin-top:4px;font-size:11.5px;line-height:1.35;color:var(--muted);white-space:normal}
+.payment-group-toggle .chevron{
+  width:30px;height:28px;padding:0;border-radius:8px;background:var(--group-soft);color:var(--primary);
+  display:grid;place-items:center;flex:0 0 auto;font-size:0;
+}
+.payment-group-toggle .chevron::before{content:'›';font-size:20px;line-height:1;transform:rotate(0deg);transition:transform .16s ease}
+.payment-group.open .payment-group-toggle .chevron::before{transform:rotate(90deg)}
+.payment-group>.table-wrap{border:0;border-top:1px solid var(--group-border);border-radius:0;background:#fcfefe}
+.payment-group-empty{border-top:1px solid var(--group-border);padding:18px 17px;margin:0;background:#fcfefe}
+
+/* Documentos: referência visual canônica */
+.documents-project-head{min-height:66px}
+.documents-project-title strong{font-size:15px;line-height:1.25}
+.documents-project-title small{font-size:11.5px;line-height:1.35}
+.documents-project-chevron{width:28px;height:28px;border-radius:8px;background:var(--group-soft)}
+.documents-project-count{min-width:30px;height:28px;padding:0 9px;background:var(--group-pill)}
+.documents-project-body{background:#fcfefe}
+
+/* Tabelas internas preservam informação, mas pertencem visualmente ao card */
+.progress-type-body .table,
+.project-group>.table-wrap .table,
+.payment-group>.table-wrap .table,
+.documents-project-body .table{margin:0}
+
+@media(max-width:900px){
+  .progress-type-head{align-items:flex-start}
+  .progress-type-highlight{max-width:44%;flex-wrap:wrap}
+  .progress-type-highlight span{display:none}
+}
+
+@media(max-width:720px){
+  .documents-project-head,.progress-type-head,.project-group-toggle,.payment-group-toggle{padding:13px;min-height:60px}
+  .progress-type-highlight{max-width:42%}
+  .progress-type-highlight b{display:none}
+  .progress-type-title strong,.project-group-toggle>span:nth-child(2),.payment-group-toggle h3{font-size:14px;white-space:normal}
+  .payment-group-toggle .muted{font-size:11px}
+}
