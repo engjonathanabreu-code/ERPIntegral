@@ -1,0 +1,35 @@
+name: Fix project payment list
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-project-payment-list.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show all project payments in numeric order
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js')
+          src = path.read_text()
+          old = "sortPayments(pays).slice(0,8).map(x=>"
+          new = "[...pays].sort((a,b)=>{const an=Number((String(a.name||'').match(/\\d+/)||['999999'])[0]);const bn=Number((String(b.name||'').match(/\\d+/)||['999999'])[0]);if(an!==bn)return an-bn;return String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});}).map(x=>"
+          if old not in src:
+              raise SystemExit('Trecho da lista financeira não encontrado; nenhuma alteração aplicada.')
+          path.write_text(src.replace(old, new, 1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "Integral Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add ERP-INTEGRAL-4.0-SUPABASE-MIGRADO/public/app.js
+          git commit -m "fix: mostrar todas parcelas em ordem numérica" || exit 0
+          git push
