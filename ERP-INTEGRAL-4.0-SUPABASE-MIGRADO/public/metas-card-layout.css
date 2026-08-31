@@ -18,6 +18,16 @@
   outline:1px dashed rgba(15,95,91,.28);
   outline-offset:3px;
 }
+.metas2-board .metas2-card-resizing{
+  cursor:ew-resize!important;
+  transition:none!important;
+  transform:none!important;
+  box-shadow:0 8px 24px rgba(15,80,77,.13);
+  border-color:#78b8b1;
+}
+.metas2-board .metas2-card-resizing *{
+  pointer-events:none;
+}
 @media(max-width:720px){
   .metas2-board .metas-board-col{grid-auto-flow:row}
 }
