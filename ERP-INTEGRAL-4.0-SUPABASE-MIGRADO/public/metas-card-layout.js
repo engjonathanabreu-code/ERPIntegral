@@ -1,28 +1,43 @@
-/* ERP Integral — disposição e ordenação dos cards na aba Metas.
-   Títulos curtos ocupam meia coluna, títulos longos a largura inteira.
-   Cards de meia largura são compactados em pares e a ordem escolhida por
-   arrastar é persistida em metas.ordem_coluna. */
+/* ERP Integral — disposição, ordenação e redimensionamento dos cards na aba Metas.
+   Cards podem ocupar meia largura ou largura inteira. Cards de meia largura
+   são compactados em pares. A ordem e a largura escolhidas pelo usuário são
+   persistidas em metas.ordem_coluna e metas.largura_card. */
 (() => {
   'use strict';
 
   const LONG_TITLE_MIN = 34;
+  const EDGE_SIZE = 10;
+  const RESIZE_THRESHOLD = 26;
   const COL_SELECTOR = '.metas2-board .metas-board-col';
   const CARD_SELECTOR = '.metas2-card[data-meta-card]';
   let scheduled = false;
   let dragging = null;
+  let resizing = null;
   let dragJustEndedUntil = 0;
   const initializedSignature = new WeakMap();
+  const savedWidths = new Map();
 
   const sb = () => window.ERPIntegralBridge?.sb || null;
   const cardsOf = col => Array.from(col.querySelectorAll(CARD_SELECTOR));
 
-  function classifyCard(card) {
+  function autoWidth(card) {
     const title = (card.querySelector('.metas2-card-top strong')?.textContent || '').trim();
-    const wide = title.length >= LONG_TITLE_MIN;
-    card.classList.toggle('metas2-card-wide', wide);
-    card.classList.toggle('metas2-card-half', !wide);
+    return title.length >= LONG_TITLE_MIN ? 'full' : 'half';
+  }
+
+  function setCardWidth(card, width) {
+    const full = width === 'full';
+    card.classList.toggle('metas2-card-wide', full);
+    card.classList.toggle('metas2-card-half', !full);
+    card.dataset.metaCardWidth = full ? 'full' : 'half';
+  }
+
+  function classifyCard(card) {
+    const saved = savedWidths.get(card.dataset.metaCard);
+    setCardWidth(card, saved || autoWidth(card));
     card.setAttribute('draggable', 'true');
-    card.title = 'Arraste para reorganizar esta meta dentro da coluna';
+    card.title = 'Arraste para reorganizar. Puxe a borda lateral para redimensionar.';
+    installResize(card);
   }
 
   function normalizeCards(root = document) {
@@ -31,7 +46,7 @@
 
   async function restoreSavedOrder(col) {
     const cards = cardsOf(col);
-    if (cards.length < 2) return;
+    if (!cards.length) return;
     const ids = cards.map(c => c.dataset.metaCard).filter(Boolean);
     const signature = ids.slice().sort().join('|');
     if (initializedSignature.get(col) === signature) return;
@@ -39,11 +54,17 @@
 
     const client = sb();
     if (!client) return;
-    const { data, error } = await client.from('metas').select('id,ordem_coluna').in('id', ids);
+    const { data, error } = await client.from('metas').select('id,ordem_coluna,largura_card').in('id', ids);
     if (error || !data) {
-      if (error) console.warn('Metas: não foi possível carregar a ordem dos cards.', error);
+      if (error) console.warn('Metas: não foi possível carregar a organização dos cards.', error);
       return;
     }
+
+    data.forEach(row => {
+      if (row.largura_card === 'half' || row.largura_card === 'full') {
+        savedWidths.set(String(row.id), row.largura_card);
+      }
+    });
 
     const currentIndex = new Map(cards.map((card, i) => [card.dataset.metaCard, i]));
     const order = new Map(data.map(row => [String(row.id), Number.isFinite(row.ordem_coluna) ? row.ordem_coluna : null]));
@@ -56,6 +77,7 @@
       return av - bv || currentIndex.get(a.dataset.metaCard) - currentIndex.get(b.dataset.metaCard);
     });
     cards.forEach(card => col.appendChild(card));
+    cards.forEach(classifyCard);
   }
 
   async function persistColumnOrder(col) {
@@ -67,6 +89,84 @@
     ));
     const failed = results.find(r => r.error);
     if (failed?.error) console.warn('Metas: não foi possível salvar a ordem dos cards.', failed.error);
+  }
+
+  async function persistCardWidth(card) {
+    const client = sb();
+    if (!client) return;
+    const width = card.classList.contains('metas2-card-wide') ? 'full' : 'half';
+    savedWidths.set(card.dataset.metaCard, width);
+    const { error } = await client.from('metas').update({ largura_card: width }).eq('id', card.dataset.metaCard);
+    if (error) console.warn('Metas: não foi possível salvar a largura do card.', error);
+  }
+
+  function edgeAt(card, clientX) {
+    const box = card.getBoundingClientRect();
+    if (Math.abs(clientX - box.left) <= EDGE_SIZE) return 'left';
+    if (Math.abs(clientX - box.right) <= EDGE_SIZE) return 'right';
+    return null;
+  }
+
+  function widthFromDrag(state, clientX) {
+    const delta = clientX - state.startX;
+    if (Math.abs(delta) < RESIZE_THRESHOLD) return state.startWidth;
+    if (state.edge === 'right') {
+      return state.startWidth === 'half'
+        ? (delta > 0 ? 'full' : 'half')
+        : (delta < 0 ? 'half' : 'full');
+    }
+    return state.startWidth === 'half'
+      ? (delta < 0 ? 'full' : 'half')
+      : (delta > 0 ? 'half' : 'full');
+  }
+
+  function finishResize(event) {
+    if (!resizing) return;
+    const state = resizing;
+    resizing = null;
+    state.card.classList.remove('metas2-card-resizing');
+    state.card.setAttribute('draggable', 'true');
+    state.card.style.cursor = '';
+    try { state.card.releasePointerCapture?.(event.pointerId); } catch (_) {}
+    persistCardWidth(state.card);
+    dragJustEndedUntil = Date.now() + 350;
+  }
+
+  function installResize(card) {
+    if (card.dataset.metaResizeReady === '1') return;
+    card.dataset.metaResizeReady = '1';
+
+    card.addEventListener('mousemove', event => {
+      if (resizing?.card === card) return;
+      card.style.cursor = edgeAt(card, event.clientX) ? 'ew-resize' : '';
+    });
+    card.addEventListener('mouseleave', () => {
+      if (!resizing) card.style.cursor = '';
+    });
+
+    card.addEventListener('pointerdown', event => {
+      if (event.pointerType && event.pointerType !== 'mouse') return;
+      const edge = edgeAt(card, event.clientX);
+      if (!edge) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startWidth = card.classList.contains('metas2-card-wide') ? 'full' : 'half';
+      resizing = { card, edge, startX: event.clientX, startWidth };
+      card.setAttribute('draggable', 'false');
+      card.classList.add('metas2-card-resizing');
+      card.style.cursor = 'ew-resize';
+      card.setPointerCapture?.(event.pointerId);
+    }, true);
+
+    card.addEventListener('pointermove', event => {
+      if (!resizing || resizing.card !== card) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setCardWidth(card, widthFromDrag(resizing, event.clientX));
+    }, true);
+
+    card.addEventListener('pointerup', finishResize, true);
+    card.addEventListener('pointercancel', finishResize, true);
   }
 
   function insertionTarget(col, x, y, draggedCard) {
@@ -86,6 +186,10 @@
     col.dataset.metaDnDReady = '1';
 
     col.addEventListener('dragstart', event => {
+      if (resizing) {
+        event.preventDefault();
+        return;
+      }
       const card = event.target.closest?.(CARD_SELECTOR);
       if (!card || card.closest(COL_SELECTOR) !== col) return;
       dragging = card;
