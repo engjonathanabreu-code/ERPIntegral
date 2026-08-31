@@ -62,23 +62,23 @@
     const client = sb();
     if (!client) return;
     const cards = cardsOf(col);
-    const updates = cards.map((card, index) =>
+    const results = await Promise.all(cards.map((card, index) =>
       client.from('metas').update({ ordem_coluna: (index + 1) * 10 }).eq('id', card.dataset.metaCard)
-    );
-    const results = await Promise.all(updates);
+    ));
     const failed = results.find(r => r.error);
     if (failed?.error) console.warn('Metas: não foi possível salvar a ordem dos cards.', failed.error);
   }
 
-  function cardAfterPointer(col, y, draggedCard) {
+  function insertionTarget(col, x, y, draggedCard) {
     const candidates = cardsOf(col).filter(card => card !== draggedCard);
-    let closest = { offset: Number.NEGATIVE_INFINITY, card: null };
     for (const card of candidates) {
       const box = card.getBoundingClientRect();
-      const offset = y - box.top - box.height / 2;
-      if (offset < 0 && offset > closest.offset) closest = { offset, card };
+      const centerX = box.left + box.width / 2;
+      const centerY = box.top + box.height / 2;
+      const sameRow = y >= box.top && y <= box.bottom;
+      if (y < centerY || (sameRow && x < centerX)) return card;
     }
-    return closest.card;
+    return null;
   }
 
   function installDnD(col) {
@@ -101,7 +101,7 @@
       if (!dragging || dragging.closest(COL_SELECTOR) !== col) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-      const before = cardAfterPointer(col, event.clientY, dragging);
+      const before = insertionTarget(col, event.clientX, event.clientY, dragging);
       if (before) col.insertBefore(dragging, before);
       else col.appendChild(dragging);
     });
