@@ -1,0 +1,23 @@
+/* ERP Integral — organização visual dos cards no quadro de Metas. */
+.metas2-board .metas-board-col{
+  grid-auto-flow:row dense;
+}
+.metas2-board .metas2-card[draggable="true"]{
+  cursor:grab;
+  user-select:none;
+}
+.metas2-board .metas2-card[draggable="true"]:active{
+  cursor:grabbing;
+}
+.metas2-board .metas2-card-dragging{
+  opacity:.42;
+  transform:scale(.985);
+  box-shadow:0 10px 28px rgba(15,80,77,.16);
+}
+.metas2-board .metas-board-col-dragging{
+  outline:1px dashed rgba(15,95,91,.28);
+  outline-offset:3px;
+}
+@media(max-width:720px){
+  .metas2-board .metas-board-col{grid-auto-flow:row}
+}
