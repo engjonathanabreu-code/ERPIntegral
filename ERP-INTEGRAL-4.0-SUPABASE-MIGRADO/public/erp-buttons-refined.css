@@ -1,0 +1,45 @@
+/* Padrao refinado de botoes do ERP Integral */
+.btn{
+  min-height:32px;
+  padding:7px 11px;
+  border-radius:8px;
+  font-size:12px;
+  line-height:1.2;
+  font-weight:700;
+  gap:6px;
+  box-shadow:none;
+  transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .08s ease,opacity .16s ease;
+}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{transform:none;opacity:.58;cursor:not-allowed}
+.btn.small{
+  min-height:27px;
+  padding:5px 8px;
+  border-radius:7px;
+  font-size:11px;
+  gap:5px;
+}
+.btn.icon{
+  width:30px;
+  height:30px;
+  min-height:30px;
+  padding:0;
+  border-radius:8px;
+  font-size:13px;
+}
+.btn.wide{width:100%}
+.toolbar .btn,.section-head .btn,.project-detail-toolbar .btn,.actions .btn,.modal-foot .btn{
+  min-height:30px;
+  padding:6px 10px;
+  font-size:11.5px;
+}
+.actions .btn.small{min-height:26px;padding:4px 7px;font-size:10.5px}
+.modal-foot{gap:7px}
+.inline-add .btn{flex:0 0 auto}
+.stage-buttons .btn,.payment-mini-actions .btn{min-height:28px;padding:5px 9px;font-size:11px}
+.login-card .btn.wide{min-height:36px;font-size:12.5px}
+@media(max-width:720px){
+  .btn{min-height:34px}
+  .toolbar .right .btn{min-height:34px}
+}
