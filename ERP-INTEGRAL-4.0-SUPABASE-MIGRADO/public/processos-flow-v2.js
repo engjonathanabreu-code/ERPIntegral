@@ -36,9 +36,12 @@ function relabel(root=document){
   const select=root.querySelector('#pdStage');
   if(select){
     [...select.options].forEach(opt=>{
-      if(opt.value==='Análise Documental') opt.remove();
+      const realStage=opt.getAttribute('value') || opt.value || opt.textContent.trim();
+      // Mantém o valor canônico que o banco aceita e altera somente o texto visível.
+      opt.value=realStage;
+      if(realStage==='Análise Documental') opt.remove();
       else {
-        const label=LABELS[opt.value];
+        const label=LABELS[realStage];
         if(label && opt.textContent!==label) opt.textContent=label;
       }
     });
