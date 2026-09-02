@@ -7,10 +7,33 @@ const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLo
 async function loadProcessos(){if(!sb)return;const r=await sb.from('processos_kanban').select('id,crm_projeto_id,municipio,estado,nucleo,excluido_erp').eq('excluido_erp',false).order('municipio').order('nucleo');if(!r.error)processos=r.data||[];else console.warn('Projetos para metas',r.error);}
 async function syncMeta(metaId){if(!metaId||!sb)return;try{const {error}=await sb.functions.invoke('sincronizar-meta-crm',{body:{meta_id:metaId}});if(error)console.warn('Sincronização meta CRM',error)}catch(e){console.warn('Sincronização meta CRM',e)}}
 async function existingLinks(metaId){if(!metaId)return[];const r=await sb.from('meta_projetos').select('processo_id').eq('meta_id',metaId);return r.error?[]:(r.data||[]).map(x=>x.processo_id)}
-function groupedOptions(selected=[]){const groups=new Map();processos.forEach(p=>{if(!groups.has(p.municipio))groups.set(p.municipio,[]);groups.get(p.municipio).push(p)});return [...groups.entries()].map(([m,ps])=>`<div class="meta-project-group"><strong>${esc(m)}</strong>${ps.map(p=>`<label class="meta-project-item"><input type="checkbox" name="metaProjeto" value="${p.id}" ${selected.includes(p.id)?'checked':''}><span>${esc(p.nucleo)}</span></label>`).join('')}</div>`).join('')}
+function groupedOptions(selected=[]){
+  const groups=new Map();
+  processos.forEach(p=>{const municipio=String(p.municipio||'Sem município').trim()||'Sem município';if(!groups.has(municipio))groups.set(municipio,[]);groups.get(municipio).push(p)});
+  return [...groups.entries()].map(([m,ps])=>{
+    const selectedCount=ps.filter(p=>selected.includes(p.id)).length;
+    const opened=selectedCount>0;
+    return `<section class="meta-project-group ${opened?'is-open':''}" data-municipio="${esc(m)}">
+      <button type="button" class="meta-project-tab" aria-expanded="${opened?'true':'false'}">
+        <span class="meta-project-tab-name">${esc(m)}</span>
+        <span class="meta-project-tab-meta"><span class="meta-project-selected-count" ${selectedCount?'':'hidden'}>${selectedCount} selecionado${selectedCount===1?'':'s'}</span><span class="meta-project-total">${ps.length}</span><span class="meta-project-chevron">⌄</span></span>
+      </button>
+      <div class="meta-project-panel" ${opened?'':'hidden'}>
+        ${ps.map(p=>`<label class="meta-project-item"><input type="checkbox" name="metaProjeto" value="${p.id}" ${selected.includes(p.id)?'checked':''}><span>${esc(p.nucleo)}</span></label>`).join('')}
+      </div>
+    </section>`;
+  }).join('')
+}
+function updateGroupCount(group){if(!group)return;const n=group.querySelectorAll('input[name="metaProjeto"]:checked').length;const badge=group.querySelector('.meta-project-selected-count');if(badge){badge.hidden=!n;badge.textContent=n?`${n} selecionado${n===1?'':'s'}`:''}}
+function setGroupOpen(group,open){if(!group)return;group.classList.toggle('is-open',open);group.querySelector('.meta-project-panel')?.toggleAttribute('hidden',!open);const btn=group.querySelector('.meta-project-tab');if(btn)btn.setAttribute('aria-expanded',open?'true':'false')}
+function wireProjectTabs(wrap){
+  wrap.querySelectorAll('.meta-project-tab').forEach(btn=>btn.addEventListener('click',()=>{const group=btn.closest('.meta-project-group');setGroupOpen(group,!group.classList.contains('is-open'))}));
+  wrap.querySelectorAll('input[name="metaProjeto"]').forEach(input=>input.addEventListener('change',()=>updateGroupCount(input.closest('.meta-project-group'))));
+}
 async function enhanceForm(form){if(form.dataset.projectEnhanced)return;form.dataset.projectEnhanced='1';await loadProcessos();const selected=await existingLinks(currentMetaId);const respField=[...form.querySelectorAll('.field.full')].find(x=>x.querySelector('input[name="responsavel"]'));
- const wrap=document.createElement('div');wrap.className='field full meta-project-link-field';wrap.innerHTML=`<label>Projetos / Núcleos vinculados</label><input type="search" class="meta-project-search" placeholder="Buscar município ou núcleo"><div class="meta-project-picker">${groupedOptions(selected)}</div><small class="muted">Opcional. A mesma meta pode ser vinculada a vários projetos, além da associação principal acima.</small>`;respField?.before(wrap)||form.appendChild(wrap);
- const search=wrap.querySelector('.meta-project-search');search.oninput=()=>{const q=norm(search.value);wrap.querySelectorAll('.meta-project-group').forEach(g=>{let any=false;g.querySelectorAll('.meta-project-item').forEach(i=>{const show=!q||norm(i.textContent).includes(q)||norm(g.querySelector('strong')?.textContent).includes(q);i.hidden=!show;if(show)any=true});g.hidden=!any})};
+ const wrap=document.createElement('div');wrap.className='field full meta-project-link-field';wrap.innerHTML=`<label>Projetos / Núcleos vinculados</label><input type="search" class="meta-project-search" placeholder="Buscar município ou núcleo"><div class="meta-project-picker">${groupedOptions(selected)}</div><small class="muted">Opcional. Clique em um município para abrir os projetos e núcleos disponíveis.</small>`;respField?.before(wrap)||form.appendChild(wrap);
+ wireProjectTabs(wrap);
+ const search=wrap.querySelector('.meta-project-search');search.oninput=()=>{const q=norm(search.value);wrap.querySelectorAll('.meta-project-group').forEach(g=>{const municipalityMatch=norm(g.dataset.municipio).includes(q);let visible=0;g.querySelectorAll('.meta-project-item').forEach(i=>{const show=!q||municipalityMatch||norm(i.textContent).includes(q);i.hidden=!show;if(show)visible++});g.hidden=!!q&&!visible;if(q&&visible)setGroupOpen(g,true);else if(!q&&g.querySelectorAll('input[name="metaProjeto"]:checked').length===0)setGroupOpen(g,false)})};
  form.addEventListener('submit',()=>{const ids=[...form.querySelectorAll('input[name="metaProjeto"]:checked')].map(x=>x.value);const title=form.elements.titulo?.value?.trim()||'';const expected=currentMetaId;setTimeout(()=>persistLinks(expected,title,ids),700)},true);
 }
 async function persistLinks(expectedId,title,ids){if(!sb)return;let metaId=expectedId;if(!metaId&&title){const u=bridge?.currentUser?.id;let q=sb.from('metas').select('id').eq('titulo',title).order('updated_at',{ascending:false}).limit(1);if(u)q=q.eq('created_by',u);const r=await q.maybeSingle();metaId=r.data?.id||null;}if(!metaId)return;currentMetaId=metaId;const del=await sb.from('meta_projetos').delete().eq('meta_id',metaId);if(del.error){console.warn(del.error);return}if(ids.length){const rows=ids.map(id=>{const p=processos.find(x=>x.id===id);return{meta_id:metaId,processo_id:id,crm_projeto_id:p?.crm_projeto_id||null,created_by:bridge?.currentUser?.id||null}});const ins=await sb.from('meta_projetos').insert(rows);if(ins.error){console.warn(ins.error);return}}await syncMeta(metaId)}
