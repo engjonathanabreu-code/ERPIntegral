@@ -18,23 +18,29 @@ function relabel(root=document){
       return;
     }
     const head=col.querySelector('.process-column-head span');
-    if(head && LABELS[stage]) head.textContent=LABELS[stage];
+    const label=LABELS[stage];
+    if(head && label && head.textContent!==label) head.textContent=label;
   });
 
   root.querySelectorAll('.municipio-stage-summary span').forEach(el=>{
-    const text=el.childNodes[0]?.textContent?.trim()||'';
+    const first=el.childNodes[0];
+    const text=first?.textContent?.trim()||'';
     if(text==='Análise Documental'){
       el.remove();
       return;
     }
-    if(LABELS[text] && el.childNodes[0]) el.childNodes[0].textContent=LABELS[text]+' ';
+    const label=LABELS[text];
+    if(label && first && first.textContent!==label+' ') first.textContent=label+' ';
   });
 
   const select=root.querySelector('#pdStage');
   if(select){
     [...select.options].forEach(opt=>{
       if(opt.value==='Análise Documental') opt.remove();
-      else if(LABELS[opt.value]) opt.textContent=LABELS[opt.value];
+      else {
+        const label=LABELS[opt.value];
+        if(label && opt.textContent!==label) opt.textContent=label;
+      }
     });
   }
 
