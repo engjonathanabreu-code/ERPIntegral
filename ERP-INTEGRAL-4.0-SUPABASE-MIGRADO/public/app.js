@@ -1093,7 +1093,7 @@ async function render(){
   })().finally(()=>{renderPromise=null;});
   return renderPromise;
 }
-window.ERPMetasV2={render,refresh:render,historyModal,canCreate:canManageMeta,createForProcess(id){if(!canManageMeta())return;window.dispatchEvent(new CustomEvent('erp-meta-for-process',{detail:{processId:id}}));metaModal();},async openDetail(id){document.querySelector('.nav [data-view="metas"]')?.click();await render();metaDetail(id);}};
+window.ERPMetasV2={render,refresh:render,historyModal,canCreate:canManageMeta,async createForProcess(id){if(!canManageMeta())return;window.dispatchEvent(new CustomEvent('erp-meta-for-process',{detail:{processId:id}}));await metaModal();const form=qs('#metaV2Form');if(form)form.dataset.processLink=id;},async openDetail(id){document.querySelector('.nav [data-view="metas"]')?.click();await render();metaDetail(id);}};
 window.addEventListener('erp-bridge-ready',()=>{if(B()?.currentView==='metas')render();});
 })();
 
