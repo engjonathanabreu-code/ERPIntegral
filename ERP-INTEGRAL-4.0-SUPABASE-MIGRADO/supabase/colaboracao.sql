@@ -215,6 +215,10 @@ end $$;
 -- Link validation runs as the caller BEFORE the privileged atomic operation.
 create function public.erp_collab_action(op text,p jsonb) returns jsonb language plpgsql security invoker set search_path='' as $$
 begin
+ if op='remover_pessoal' then
+   delete from public.erp_agenda_pessoal where usuario_id=auth.uid() and chave=left(p->>'chave',300);
+   return jsonb_build_object('id',null);
+ end if;
  if op in ('evento','conversa') and nullif(p->>'entidade_tipo','') is not null and not erp_collab_private.entity_visible(p->>'entidade_tipo',(p->>'entidade_id')::uuid) then raise exception 'Você não tem acesso ao registro associado'; end if;
  return erp_collab_private.mutate(op,p);
 end $$;
@@ -236,17 +240,9 @@ create view public.erp_prazos with (security_invoker=true) as
  from public.etapas_plano s join public.planos_trabalho p on p.id=s.plano_id
  where s.prazo is not null and s.status not in ('Concluída','Concluído','Cancelado') and p.status not in ('Concluído','Cancelado')
  union all
- select 'projeto:'||p.id,'projeto',p.id,p.nome,coalesce(p.data_inicio,p.created_at::date),p.prazo_final,array[p.created_by]
- from public.projetos p where p.prazo_final is not null and p.status not in ('Concluído','Cancelado')
- union all
  select 'processo:'||p.id,'processo',p.id,p.nucleo,least(p.etapa_iniciada_em::date,p.prazo),p.prazo,array[p.responsavel_id]
  from public.processos_kanban p where p.prazo is not null and p.ativo and not p.excluido_erp and p.etapa_atual not in ('Concluído','Concluída','Finalizado','Cancelado')
- union all
- select 'etapa_projeto:'||s.id,'projeto',p.id,p.nome||' — '||s.titulo,least(s.created_at::date,s.prazo),s.prazo,array[p.created_by]
- from public.etapas_projeto s join public.projetos p on p.id=s.projeto_id where s.prazo is not null and s.status not in ('Concluída','Concluído') and p.status not in ('Concluído','Cancelado')
- union all
- select 'pagamento:'||s.id,'projeto',p.id,p.nome||' — Pagamento: '||s.nome_etapa,least(s.created_at::date,s.vencimento),s.vencimento,array[p.created_by]
- from public.pagamentos s join public.projetos p on p.id=s.projeto_id where s.vencimento is not null and s.status not in ('Pago','Recebido','Cancelado') and coalesce(s.valor_recebido,0)<s.valor_previsto and p.status not in ('Concluído','Cancelado');
+;
 revoke all on public.erp_prazos from anon;
 grant select on public.erp_prazos to authenticated;
 
@@ -256,7 +252,10 @@ create function public.erp_collab_notifications() returns table(chave text,titul
  from public.erp_prazos p where auth.uid()=any(p.participantes)
  union all
  select 'prazo:'||p.chave||':'||d.dia,case when p.fim<d.dia then 'Em atraso: ' else 'Prazo em '||(p.fim-d.dia)||' dia(s): ' end||p.titulo,'prazo',p.entidade_tipo,p.entidade_id,null::uuid,null::uuid,p.fim
- from public.erp_prazos p cross join d where auth.uid()=any(p.participantes) and p.entidade_tipo in ('meta','plano') and (p.fim-d.dia in (3,1) or p.fim<d.dia)
+ from public.erp_prazos p cross join d where auth.uid()=any(p.participantes) and p.entidade_tipo in ('meta','plano','processo') and (p.fim-d.dia in (3,1) or p.fim<d.dia)
+ union all
+ select 'projeto_prazo:'||p.id||':'||d.dia,case when p.prazo_final<d.dia then 'Projeto em atraso: ' else 'Projeto vence em '||(p.prazo_final-d.dia)||' dia(s): ' end||p.nome,'prazo','projeto',p.id,null::uuid,null::uuid,p.prazo_final
+ from public.projetos p cross join d where p.created_by=auth.uid() and p.prazo_final is not null and p.status not in ('Concluído','Cancelado') and (p.prazo_final-d.dia in (3,1) or p.prazo_final<d.dia)
  union all
  select 'evento:'||e.id,'Convite: '||e.titulo,'evento',e.entidade_tipo,e.entidade_id,e.id,null::uuid,(e.fim at time zone 'America/Sao_Paulo')::date
  from public.erp_eventos e where auth.uid()=any(e.participantes) and e.created_by<>auth.uid() and e.status='ativo' and e.fim>=now()
