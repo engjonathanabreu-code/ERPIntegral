@@ -11,7 +11,7 @@
   const stamp=v=>new Date(v).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
   const labels={projeto:'Projeto',plano:'Plano de trabalho',meta:'Meta',processo:'Processo'};
   let state={userId:null,page:null,mode:'mensal',anchor:today(),filter:'todos',agenda:'',events:[],deadlines:[],agendas:[],users:[],links:[],colors:[],personal:[],notifications:[],chats:[],chat:null,tab:'direto',messages:[]};
-  let loading=false, refreshBusy=false, modalReturn=null;
+  let loading=false, refreshBusy=false, modalReturn=null, chatPrimed=false;const chatSeen=new Set();
   const sb=()=>B().sb;
   async function rows(table,configure=q=>q) {
     const data=[];
@@ -111,6 +111,25 @@
     bind('[data-read-notice]',async b=>{await action('lida',{chave:state.notifications[Number(b.dataset.readNotice)].chave});await notifications();});
     bind('[data-personal-notice]',async b=>{const n=state.notifications[Number(b.dataset.personalNotice)];const key=n.evento_id?`evento:${n.evento_id}`:n.chave.replace(/^vinculo:/,'').replace(/^prazo:/,'').replace(/:\d{4}-\d{2}-\d{2}$/,'');const added=await togglePersonal(key);b.textContent=added?'Remover da minha agenda':'Adicionar à minha agenda';});
   }
+  const silenceKey=()=>`erp-chat-silence:${me()?.id||''}`;
+  const silenced=()=>Number(localStorage.getItem(silenceKey())||0)>Date.now();
+  function showChatPopup(message,chat){
+    if(silenced()||message.autor_id===me().id)return;
+    const existing=$('#collabChatPopup');existing?.remove();
+    const name=chatTitle(chat),popup=document.createElement('aside');popup.id='collabChatPopup';popup.className='collab-chat-popup';
+    popup.innerHTML=`<header><strong>Nova mensagem</strong><button type="button" aria-label="Fechar" data-popup-close>×</button></header><p><b>${esc(name)}</b></p><p class="collab-popup-text">${esc(message.texto||'Arquivo enviado')}</p><div class="collab-actions"><button class="btn" data-popup-open>Abrir Chat</button><button class="btn secondary" data-popup-min>Minimizar</button><select aria-label="Silenciar chat" data-popup-silence><option value="">Silenciar…</option><option value="3600000">1 hora</option><option value="14400000">4 horas</option><option value="86400000">1 dia</option></select></div>`;
+    document.body.appendChild(popup);
+    $('[data-popup-close]',popup).onclick=()=>popup.remove();
+    $('[data-popup-min]',popup).onclick=()=>popup.classList.toggle('minimized');
+    $('[data-popup-open]',popup).onclick=async()=>{popup.remove();state.chat=chat.id;await openPage('chat');};
+    $('[data-popup-silence]',popup).onchange=e=>{if(e.target.value){localStorage.setItem(silenceKey(),String(Date.now()+Number(e.target.value)));popup.remove();}};
+  }
+  async function checkChatMessages(){
+    await loadChats();const chats=state.chats;
+    const latest=await Promise.all(chats.map(async chat=>{const r=await sb().from('erp_mensagens').select('*').eq('conversa_id',chat.id).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(1);if(r.error)throw r.error;return {chat,message:r.data?.[0]};}));
+    for(const item of latest){if(!item.message)continue;const key=item.message.id;if(!chatPrimed){chatSeen.add(key);continue;}if(!chatSeen.has(key)){chatSeen.add(key);showChatPopup(item.message,item.chat);}}
+    chatPrimed=true;
+  }
   async function loadChats(){state.chats=await rows('erp_conversas',q=>q.order('created_at',{ascending:false}));if(state.chat&&!state.chats.some(c=>c.id===state.chat))state.chat=null;if(state.chat)state.tab=state.chats.find(c=>c.id===state.chat).tipo;}
   const chatTitle=c=>c.tipo==='direto'?c.participantes.filter(id=>id!==me().id).map(userName).join(', '):c.titulo;
   function renderChat(){
@@ -164,19 +183,19 @@
   }
   function attachHistory(root,type,id){if(!root||!id||root.querySelector(`.collab-history-button[data-entity-id="${id}"]`))return;const b=document.createElement('button');b.type='button';b.className='btn secondary collab-history-button';b.dataset.entityId=id;b.textContent='Calendário e chat · Histórico';b.onclick=e=>{e.preventDefault();e.stopPropagation();run(()=>history(type,id),b);};root.appendChild(b);}
   function reconcile(){
-    const nav=$('.nav'),user=me();if(!nav||!user){state.userId=null;state.page=null;state.notifications=[];state.messages=[];state.chats=[];pendingUpload=null;closeDialog();return;}
+    const nav=$('.nav'),user=me();if(!nav||!user){state.userId=null;state.page=null;state.notifications=[];state.messages=[];state.chats=[];chatSeen.clear();chatPrimed=false;$('#collabChatPopup')?.remove();pendingUpload=null;closeDialog();return;}
     if(!nav.querySelector('[data-collab-page]')){
-      for(const [page,label] of [['calendario','Calendário'],['chat','CHAT']]){const b=document.createElement('button');b.dataset.collabPage=page;b.textContent=label;b.onclick=()=>run(()=>openPage(page));if(page==='calendario')nav.insertBefore(b,nav.querySelector('[data-view="plans"]')||nav.firstChild);else nav.appendChild(b);}
+      for(const [page,label] of [['calendario','Calendário'],['chat','Chat']]){const b=document.createElement('button');b.dataset.collabPage=page;b.textContent=label;b.onclick=()=>run(()=>openPage(page));if(page==='calendario')nav.insertBefore(b,nav.querySelector('[data-view="plans"]')||nav.firstChild);else nav.insertBefore(b,nav.querySelector('[data-view="users"]')||null);}
       nav.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.closest('[data-collab-page]'))state.page=null;},true);
     }
     if(!$('#collabBell')){const b=document.createElement('button');b.id='collabBell';b.className='btn secondary collab-bell';b.setAttribute('aria-label','Notificações');b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="collabUnread" class="collab-count" hidden>0</span>';b.onclick=()=>run(notifications);$('.topbar').appendChild(b);}
-    if(state.userId!==user.id&&!loading){state.userId=user.id;loading=true;refreshNotifications().catch(e=>{console.warn('Notificações:',errorMessage(e));}).finally(()=>{loading=false;});}
+    if(state.userId!==user.id&&!loading){state.userId=user.id;chatSeen.clear();chatPrimed=false;loading=true;checkChatMessages().catch(e=>console.warn('Chat:',errorMessage(e)));refreshNotifications().catch(e=>{console.warn('Notificações:',errorMessage(e));}).finally(()=>{loading=false;});}
     $$('[data-plan-card-id]').forEach(c=>attachHistory(c,'plano',c.dataset.planCardId));
     $$('[data-collab-entity-type]').forEach(c=>attachHistory(c,c.dataset.collabEntityType,c.dataset.collabEntityId));
     const core=window.ERPCoreNavigation;if(core?.currentView==='projects'&&core.currentProjectId&&!state.page)attachHistory($('#content'),'projeto',core.currentProjectId);
   }
   let queued=false;new MutationObserver(()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;reconcile();});}}).observe(document.documentElement,{childList:true,subtree:true});
-  setInterval(async()=>{if(refreshBusy||!me()||!$('.topbar')||document.hidden)return;refreshBusy=true;try{await refreshNotifications();if(state.page==='chat'){const previous=state.chat,oldIds=state.chats.map(c=>c.id).join();await loadChats();if(previous&&!state.chat)renderChat();else{if(oldIds!==state.chats.map(c=>c.id).join()){const sidebar=$('.collab-chat-sidebar');if(sidebar){sidebar.innerHTML=state.chats.filter(c=>c.tipo===state.tab).map(c=>`<button class="collab-conversation ${c.id===state.chat?'selected':''}" data-chat="${c.id}">${esc(chatTitle(c))}</button>`).join('');bind('[data-chat]',b=>{state.chat=b.dataset.chat;renderChat();},sidebar);}}await updateMessages();}}}catch(e){if(state.page==='chat')showError(e,$('.collab-chat-body'));}finally{refreshBusy=false;}},10000);
+  setInterval(async()=>{if(refreshBusy||!me()||!$('.topbar')||document.hidden)return;refreshBusy=true;try{await refreshNotifications();await checkChatMessages();if(state.page==='chat'){const previous=state.chat,oldIds=state.chats.map(c=>c.id).join();await loadChats();if(previous&&!state.chat)renderChat();else{if(oldIds!==state.chats.map(c=>c.id).join()){const sidebar=$('.collab-chat-sidebar');if(sidebar){sidebar.innerHTML=state.chats.filter(c=>c.tipo===state.tab).map(c=>`<button class="collab-conversation ${c.id===state.chat?'selected':''}" data-chat="${c.id}">${esc(chatTitle(c))}</button>`).join('');bind('[data-chat]',b=>{state.chat=b.dataset.chat;renderChat();},sidebar);}}await updateMessages();}}}catch(e){if(state.page==='chat')showError(e,$('.collab-chat-body'));}finally{refreshBusy=false;}},10000);
   window.addEventListener('erp-bridge-ready',reconcile);
   window.ERPCollaboration={open:openPage,history,eventDetail,togglePersonal,bindPersonalButton};reconcile();
 })();
