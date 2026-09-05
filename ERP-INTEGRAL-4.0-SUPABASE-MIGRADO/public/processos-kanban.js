@@ -6,7 +6,7 @@ const STAGES=['Comercial','Coleta Documental','Análise Documental','Topografia'
 const esc=(v='')=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const brDate=v=>v?new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
 const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-let bridge=null,sb=null,processos=[],andamentos=[],profiles=[],selectedMunicipio='todos',search='',loading=false;
+let bridge=null,sb=null,processos=[],andamentos=[],profiles=[],selectedMunicipio='todos',search='',municipioSearch='',loading=false;
 let lastAutoSync=0;
 const openMunicipios=new Set();
 
@@ -78,12 +78,12 @@ function render(){
   if(selectedMunicipio!=='todos'&&!municipios.includes(selectedMunicipio))selectedMunicipio='todos';
   const counts=Object.fromEntries(STAGES.map(s=>[s,active.filter(p=>p.etapa_atual===s).length]));
   const delayed=active.filter(hasDelay).length;
-  const groups=selectedMunicipio==='todos'?municipios:municipios.filter(m=>m===selectedMunicipio);
+  const visibleMunicipios=municipios.filter(m=>!municipioSearch||norm(m).includes(norm(municipioSearch)));const groups=selectedMunicipio==='todos'?visibleMunicipios:visibleMunicipios.filter(m=>m===selectedMunicipio);
   content.innerHTML=`
     <section class="process-toolbar"><div class="process-title-block"><strong>Gestão de Processos</strong><span>Município → Núcleo → Etapa operacional</span></div><div class="process-actions"><input id="processSearch" class="process-search" placeholder="Buscar município, núcleo ou responsável" value="${esc(search)}"><button id="syncCRMProcess" class="btn secondary">Sincronizar CRM</button></div></section>
     <div id="processSyncStatus" class="process-sync-status"></div>
     <section class="process-kpis"><article><span>Processos ativos</span><strong>${active.length}</strong></article><article><span>Municípios</span><strong>${groups.length}</strong></article><article><span>Em andamento externo</span><strong>${counts['Andamento']||0}</strong></article><article class="${delayed?'warn':''}"><span>Prazo vencido</span><strong>${delayed}</strong></article></section>
-    <div class="process-municipio-filter"><button class="${selectedMunicipio==='todos'?'active':''}" data-municipio="todos">Todos <b>${allVisible.length}</b></button>${municipios.map(m=>`<button class="${selectedMunicipio===m?'active':''}" data-municipio="${esc(m)}">${esc(m)} <b>${allVisible.filter(p=>p.municipio===m).length}</b></button>`).join('')}</div>
+    <div class="process-municipio-search"><span>⌕</span><input id="municipioSearch" placeholder="Pesquisar município" value="${esc(municipioSearch)}"></div><div class="process-municipio-filter"><button class="${selectedMunicipio==='todos'?'active':''}" data-municipio="todos">Todos <b>${allVisible.length}</b></button>${municipios.map(m=>`<button class="${selectedMunicipio===m?'active':''}" data-municipio="${esc(m)}">${esc(m)} <b>${allVisible.filter(p=>p.municipio===m).length}</b></button>`).join('')}</div>
     <div class="process-groups">${groups.map(m=>municipioSection(m,active.filter(p=>p.municipio===m))).join('')||'<div class="empty">Nenhum processo encontrado.</div>'}</div>`;
   document.querySelector('#processSearch').oninput=e=>{search=e.target.value;clearTimeout(e.target._t);e.target._t=setTimeout(render,180)};
   document.querySelector('#syncCRMProcess').onclick=()=>syncCRM(false);
