@@ -72,6 +72,9 @@ create table public.erp_notificacoes_lidas (
 create table public.erp_agenda_pessoal (
  usuario_id uuid not null default auth.uid() references public.profiles(id), chave text not null, created_at timestamptz not null default now(), primary key(usuario_id,chave)
 );
+create table public.erp_calendario_ocultos (
+ usuario_id uuid not null default auth.uid() references public.profiles(id), chave text not null check(char_length(chave) between 1 and 300), created_at timestamptz not null default now(), primary key(usuario_id,chave)
+);
 create table public.erp_cores_prazos (
  chave text primary key, cor text not null check(cor ~ '^#[0-9a-fA-F]{6}$')
 );
@@ -93,7 +96,7 @@ create function erp_collab_private.event_visible(i uuid) returns boolean languag
 $$;
 
 do $$ declare t text; begin
- foreach t in array array['erp_agendas','erp_eventos','erp_evento_respostas','erp_conversas','erp_mensagens','erp_exclusoes_chat','erp_colaboracao_historico','erp_notificacoes_lidas','erp_agenda_pessoal','erp_cores_prazos'] loop
+ foreach t in array array['erp_agendas','erp_eventos','erp_evento_respostas','erp_conversas','erp_mensagens','erp_exclusoes_chat','erp_colaboracao_historico','erp_notificacoes_lidas','erp_agenda_pessoal','erp_calendario_ocultos','erp_cores_prazos'] loop
  execute format('alter table public.%I enable row level security',t);
  execute format('revoke all on public.%I from anon, authenticated',t);
  execute format('grant select on public.%I to authenticated',t);
@@ -111,6 +114,8 @@ create policy historico_read on public.erp_colaboracao_historico for select to a
  (conversa_id is not null and (erp_collab_private.chat_member(conversa_id) or public.is_admin()))));
 create policy lidas_read on public.erp_notificacoes_lidas for select to authenticated using(usuario_id=auth.uid() and erp_collab_private.active_user());
 create policy pessoal_read on public.erp_agenda_pessoal for select to authenticated using(usuario_id=auth.uid() and erp_collab_private.active_user());
+create policy ocultos_proprio on public.erp_calendario_ocultos for all to authenticated using(usuario_id=auth.uid() and erp_collab_private.active_user()) with check(usuario_id=auth.uid() and erp_collab_private.active_user());
+grant select,insert,delete on public.erp_calendario_ocultos to authenticated;
 create policy cores_read on public.erp_cores_prazos for select to authenticated using(erp_collab_private.active_user());
 
 -- Toda escrita passa por operações transacionais; clientes não podem falsificar autoria,
