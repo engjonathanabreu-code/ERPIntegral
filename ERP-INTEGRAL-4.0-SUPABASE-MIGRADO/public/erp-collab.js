@@ -10,7 +10,7 @@
   const date=v=>v?new Date(`${v.slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
   const stamp=v=>new Date(v).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
   const labels={projeto:'Projeto',plano:'Plano de trabalho',meta:'Meta',processo:'Processo'};
-  let state={userId:null,page:null,mode:'mensal',anchor:today(),filter:'todos',agenda:'',userFilters:[],events:[],deadlines:[],agendas:[],users:[],links:[],colors:[],personal:[],hidden:[],notifications:[],chats:[],chat:null,tab:'direto',messages:[]};
+  let state={userId:null,page:null,mode:'mensal',anchor:today(),filter:'todos',agenda:'',userFilters:[],events:[],deadlines:[],agendas:[],users:[],links:[],planSteps:[],colors:[],personal:[],hidden:[],notifications:[],chats:[],chat:null,tab:'direto',messages:[]};
   let loading=false, refreshBusy=false, modalReturn=null, chatPrimed=false;const chatSeen=new Set();
   const sb=()=>B().sb;
   async function rows(table,configure=q=>q) {
@@ -37,11 +37,11 @@
   const linkOptions=(selected='',group=false)=>`<option value="">${group?'Selecione o vínculo':'Evento avulso'}</option>`+state.links.filter(x=>!group||x.type!=='meta').map(x=>`<option value="${x.type}:${x.id}" ${selected===`${x.type}:${x.id}`?'selected':''}>${labels[x.type]} — ${esc(x.name)}</option>`).join('');
   function splitLink(v){const [entidade_tipo,entidade_id]=String(v||'').split(':');return {entidade_tipo:entidade_tipo||null,entidade_id:entidade_id||null};}
   async function loadReference(){
-    const result=await Promise.all([sb().rpc('erp_collab_directory'),rows('projetos'),rows('planos_trabalho'),rows('metas'),rows('processos_kanban',q=>q.eq('excluido_erp',false)),rows('erp_agendas')]);
+    const result=await Promise.all([sb().rpc('erp_collab_directory'),rows('projetos'),rows('planos_trabalho'),rows('metas'),rows('processos_kanban',q=>q.eq('excluido_erp',false)),rows('etapas_plano'),rows('erp_agendas')]);
     if(result[0].error)throw result[0].error;
-    state.users=result[0].data||[];state.projects=result[1];state.plans=result[2];state.metas=result[3];state.processes=result[4];
+    state.users=result[0].data||[];state.projects=result[1];state.plans=result[2];state.metas=result[3];state.processes=result[4];state.planSteps=result[5];
     state.links=result.slice(1,5).flatMap((list,i)=>list.map(x=>({type:['projeto','plano','meta','processo'][i],id:x.id,name:x.nome||x.titulo||x.nucleo})));
-    state.agendas=result[5];
+    state.agendas=result[6];
   }
   async function loadCalendar(){
     const p=C.period(state.anchor,state.mode);
@@ -55,7 +55,7 @@
     const p=C.period(state.anchor,state.mode), mine=new Set(state.personal.map(x=>x.chave)), hidden=new Set(state.hidden.map(x=>x.chave));
     const assigned=e=>manager()?(state.userFilters.length===0||(e.participantes||[]).some(id=>state.userFilters.includes(id))):((e.participantes||[]).includes(me()?.id)||mine.has(e.chave));
     const events=state.events.filter(e=>!hidden.has(`evento:${e.id}`)&&assigned(e)&&(!state.agenda||e.agenda_id===state.agenda)&&(state.filter!=='pessoal'||mine.has(`evento:${e.id}`)));
-    const deadlines=state.agenda?[]:state.deadlines.filter(e=>!hidden.has(e.chave)&&assigned(e)&&['meta','plano','processo'].includes(e.entidade_tipo)&&(state.filter!=='pessoal'||mine.has(e.chave)));
+    const completedPlanSteps=new Set(state.planSteps.filter(s=>['concluida','concluido'].includes(String(s.status||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase())).map(s=>String(s.id)));const isCompletedPlanDeadline=e=>e.entidade_tipo==='plano'&&(completedPlanSteps.has(String(e.etapa_id||e.origem_id||''))||[...completedPlanSteps].some(id=>String(e.chave||'').includes(id)));const deadlines=state.agenda?[]:state.deadlines.filter(e=>!isCompletedPlanDeadline(e)&&!hidden.has(e.chave)&&assigned(e)&&['meta','plano','processo'].includes(e.entidade_tipo)&&(state.filter!=='pessoal'||mine.has(e.chave)));
     const offset=new Date(`${p.start}T12:00:00`).getDay();
     $('#content').innerHTML=`<div class="collab-toolbar"><h3>${date(p.start)} a ${date(p.end)}</h3><button class="btn secondary" data-move="-1" aria-label="Período anterior">←</button><button class="btn secondary" id="collabToday">Hoje</button><button class="btn secondary" data-move="1" aria-label="Próximo período">→</button><select aria-label="Visualização" id="collabMode">${['quinzenal','mensal','trimestral'].map(x=>`<option value="${x}" ${state.mode===x?'selected':''}>${x[0].toUpperCase()+x.slice(1)}</option>`).join('')}</select></div>
       <div class="collab-toolbar"><select id="collabFilter" aria-label="Filtrar eventos"><option value="todos">Todos os eventos acessíveis</option><option value="pessoal" ${state.filter==='pessoal'?'selected':''}>Minha agenda</option></select><select id="collabAgenda" aria-label="Agenda de ativo"><option value="">Todas as agendas</option>${state.agendas.map(a=>`<option value="${a.id}" ${a.id===state.agenda?'selected':''}>${esc(a.nome)}</option>`).join('')}</select><button class="btn" id="collabNewEvent">+ Novo evento</button>${admin()?'<button class="btn secondary" id="collabNewAgenda">+ Agenda de ativo</button>':''}${manager()?`<details class="collab-user-filter"><summary>Todos os usuários</summary><div>${state.users.map(u=>`<label><input type="checkbox" value="${u.id}" data-calendar-user ${state.userFilters.includes(u.id)?'checked':''}> ${esc(u.nome)}</label>`).join('')}</div></details>`:''}<button class="btn secondary" id="collabHidden">Ocultados</button><button class="btn secondary" id="collabRefresh">Atualizar</button></div>
