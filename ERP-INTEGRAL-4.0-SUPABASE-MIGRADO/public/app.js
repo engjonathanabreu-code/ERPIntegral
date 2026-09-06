@@ -261,7 +261,7 @@ function renderLogin(initialError=''){
   });
 }
 
-const ADMIN_NAV=[['dashboard','Visão geral'],['progress','Andamentos'],['clients','Clientes'],['projects','Projetos'],['payments','Financeiro'],['documents','Documentos'],['plans','Planos de trabalho'],['metas','Metas'],['users','Usuários']];
+const ADMIN_NAV=[['dashboard','Visão geral'],['clients','Clientes'],['projects','Projetos'],['payments','Financeiro'],['documents','Documentos'],['plans','Planos de trabalho'],['metas','Metas'],['users','Usuários']];
 const COMERCIAL_NAV=[['clients','Clientes'],['projects','Projetos'],['plans','Planos de trabalho']];
 function navItems(){if(isAdmin())return ADMIN_NAV;if(isProjectAccessManager())return [['projects','Projetos'],['plans','Planos de trabalho'],['metas','Metas']];if(isMetasSector())return [['plans','Planos de trabalho'],['metas','Metas']];if(isComercial())return COMERCIAL_NAV;if(isTechDirector())return [['metas','Metas']];return [['plans','Planos de trabalho']];}
 
@@ -324,7 +324,7 @@ function renderDashboard(){
     <div class="section-head"><div><h4>Valores em aberto para receber</h4><span class="muted">Próximos 6 meses, atualizados automaticamente conforme a data atual</span></div><div class="receivables-totals"><div class="receivables-total highlight"><span>Recebido em ${esc(curMonthLabel)}</span><strong>${money(receivedThisMonth)}</strong></div><div class="receivables-total"><span>Total previsto (6 meses)</span><strong>${money(sixMonthTotal)}</strong></div></div></div>
     <div class="receivables-grid">${months.map(m=>`<div class="receivable-month"><div class="receivable-head"><span>${esc(m.label)}</span><b>${money(m.total)}</b></div><div class="receivable-bar"><i style="width:${Math.round(m.total/maxOpen*100)}%"></i></div><small>${m.count} etapa(s) em aberto</small></div>`).join('')}</div>
   </section>
-  <h3 class="section-title">Projetos por tipo</h3><div class="grid cols-3">${SERVICE_TYPES.map(t=>`<div class="card metric"><h3>${t}</h3><b>${db.projects.filter(p=>p.type===t).length}</b></div>`).join('')}</div>`;
+  <h3 class="section-title">Projetos por tipo</h3><div class="grid cols-3">${SERVICE_TYPES.map(t=>`<div class="card metric"><h3>${t}</h3><b>${db.projects.filter(p=>p.type===t).length}</b></div>`).join('')}</div>${dashboardProgressHtml()}`;wireDashboardProgress();
 }
 
 const PROGRESS_GROUPS_STORAGE='erp_integral_progress_groups_collapsed';
@@ -337,6 +337,8 @@ function projectPlanProgress(p){
   const pct=total?Math.round(done/total*100):0;
   return {plan,total,done,pct};
 }
+function dashboardProgressHtml(){const collapsed=progressGroupState(),groups={};db.projects.forEach(p=>{const type=p.type||'OUTROS',info=projectPlanProgress(p);(groups[type]??=[]).push({p,...info})});Object.values(groups).forEach(list=>list.sort((a,b)=>b.pct-a.pct||b.done-a.done||b.total-a.total||projectProgress(b.p)-projectProgress(a.p)||a.p.name.localeCompare(b.p.name,'pt-BR',{sensitivity:'base'})));const typeOrder=[...SERVICE_TYPES,...Object.keys(groups).filter(t=>!SERVICE_TYPES.includes(t)).sort((a,b)=>a.localeCompare(b,'pt-BR'))];const sections=typeOrder.filter(t=>groups[t]?.length).map(type=>{const list=groups[type],isCollapsed=!!collapsed[type],leader=list[0],avg=Math.round(list.reduce((sum,x)=>sum+x.pct,0)/list.length);return `<section class="progress-type-group ${isCollapsed?'collapsed':''}" data-progress-group="${esc(type)}"><button type="button" class="progress-type-head" data-dashboard-toggle-progress="${esc(type)}" aria-expanded="${isCollapsed?'false':'true'}"><div class="progress-type-title"><span class="progress-type-chevron">⌄</span><div><strong>${esc(type)}</strong><small>${list.length} projeto${list.length===1?'':'s'} · média ${avg}%</small></div></div><div class="progress-type-highlight"><span>Mais adiantado</span><b>${esc(leader.p.name)}</b><em>${leader.pct}%</em></div></button><div class="progress-type-body"><div class="table-wrap progress-type-table-wrap"><table class="table progress-table"><thead><tr><th>Projeto</th><th>Status</th><th>Etapas</th><th>Progresso</th></tr></thead><tbody>${list.map(({p,total,done,pct})=>`<tr><td><button class="project-link" data-dashboard-project="${p.id}">${esc(p.name)}</button></td><td>${statusBadge(p.status||'Ativo')}</td><td><span class="progress-stage-count">${done}/${total}</span></td><td><div class="progress-cell"><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div></td></tr>`).join('')}</tbody></table></div></div></section>`}).join('');return `<section class="dashboard-progress"><div class="section-head"><div><h3>Andamentos dos projetos</h3><span class="muted">Acompanhamento por tipo de serviço</span></div></div><div class="progress-type-groups">${sections||'<div class="empty">Nenhum projeto encontrado.</div>'}</div></section>`;}
+function wireDashboardProgress(){$('[data-dashboard-toggle-progress]').forEach(b=>b.onclick=()=>{const key=b.dataset.dashboardToggleProgress;setProgressGroupCollapsed(key,!progressGroupState()[key]);renderDashboard()});$('[data-dashboard-project]').forEach(b=>b.onclick=()=>{currentProjectId=b.dataset.dashboardProject;currentView='projects';renderApp()});}
 function renderProgress(){
   title('Andamentos dos projetos');
   const q=searchTerm.trim().toLowerCase();
