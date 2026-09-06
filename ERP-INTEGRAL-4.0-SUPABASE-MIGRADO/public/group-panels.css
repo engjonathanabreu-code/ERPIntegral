@@ -163,3 +163,6 @@
   border-radius:999px;
   background:rgba(15,95,91,.10);
 }
+
+/* Seta do Financeiro alinhada ao início, como nos demais agrupadores */
+.payment-group-toggle .chevron{order:-1}
