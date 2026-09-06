@@ -104,3 +104,5 @@
   .plan-card>.plan-head>.actions{display:grid;grid-template-columns:1fr 1fr;width:100%}
   .plan-card>.plan-head>.actions .btn{width:100%}
 }
+
+.plan-card .step-toggle{flex:1;min-width:0;display:flex;align-items:center;gap:11px;border:0;background:transparent;color:inherit;padding:0;text-align:left}.plan-card .step-toggle>span:last-child{min-width:0}.plan-card .step-chevron{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;border-radius:8px;background:#e7f2f0;color:var(--primary);font-size:18px;transition:transform .16s ease}.plan-card .step.collapsed .step-chevron{transform:rotate(-90deg)}.plan-card .step.collapsed .step-top{border-bottom:0}.plan-card .step.collapsed .step-details{display:none}.plan-card .step-toggle:focus-visible{outline:3px solid rgba(26,154,146,.22);outline-offset:4px;border-radius:7px}
