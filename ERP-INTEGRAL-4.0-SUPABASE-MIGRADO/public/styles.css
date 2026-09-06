@@ -203,3 +203,13 @@
   box-shadow:0 6px 16px rgba(20,184,166,.24);
   font-weight:700;
 }
+
+/* Separação segura entre o título da página e o perfil do usuário */
+.topbar{column-gap:16px;row-gap:8px}
+.topbar h2{flex:1 1 auto;min-width:0}
+.topbar>.badge{flex:0 0 auto;margin-left:16px;white-space:nowrap;align-self:center}
+@media(max-width:520px){
+  .topbar{align-items:flex-start}
+  .topbar h2{flex-basis:100%}
+  .topbar>.badge{margin-left:0}
+}
