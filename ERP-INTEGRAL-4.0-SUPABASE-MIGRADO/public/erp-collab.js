@@ -63,7 +63,7 @@
       return sameId||key.includes(sid)||(samePlan&&String(e.titulo||'').toLowerCase().includes(String(s.titulo||'').toLowerCase()));
     });
     const metaForDeadline=e=>state.metas.find(m=>String(e.entidade_id||'')===String(m.id)||String(e.chave||'').includes(String(m.id)));
-    const inVisiblePeriod=(e,item)=>{const due=String(item?.prazo||e.fim||'').slice(0,10);return !!due&&due>=p.start&&due<=p.end};
+    const inVisiblePeriod=(e,item)=>{const end=String(item?.prazo||e.fim||'').slice(0,10),start=String(item?.inicio_prazo||e.inicio||end).slice(0,10);return !!start&&!!end&&start<=p.end&&end>=p.start};
     const activeDeadline=e=>{
       if(e.entidade_tipo==='plano'){const step=planStepForDeadline(e);return !!step&&activeStatus(step.status)&&inVisiblePeriod(e,step);}
       if(e.entidade_tipo==='meta'){const meta=metaForDeadline(e);return !!meta&&activeStatus(meta.status)&&inVisiblePeriod(e,meta);}
