@@ -71,14 +71,14 @@
   min-height:54px;
 }
 .plan-card .info-box b{font-size:11px;text-transform:uppercase;letter-spacing:.025em;margin-bottom:5px}
-.plan-card .step>.field,
-.plan-card .step>.deliverables{
+.plan-card .step-details>.field,
+.plan-card .step-details>.deliverables{
   margin:0;
   padding:13px 14px 0;
 }
-.plan-card .step>.field:last-child{padding-bottom:15px}
-.plan-card .step>.field label,
-.plan-card .step>.deliverables>b{
+.plan-card .step-details>.field:last-child{padding-bottom:15px}
+.plan-card .step-details>.field label,
+.plan-card .step-details>.deliverables>b{
   color:#3f5e5b;
   font-size:12px;
   font-weight:800;
