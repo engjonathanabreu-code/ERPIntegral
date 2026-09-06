@@ -152,3 +152,14 @@
   .progress-type-title strong,.project-group-toggle>span:nth-child(2),.payment-group-toggle h3{font-size:14px;white-space:normal}
   .payment-group-toggle .muted{font-size:11px}
 }
+
+/* Padronização visual: Projetos como referência, sem reposicionar controles */
+.documents-project-title{flex:1}
+.documents-project-title>div,
+.payment-group-toggle>div{
+  min-width:0;
+  flex:1;
+  padding:5px 10px;
+  border-radius:999px;
+  background:rgba(15,95,91,.10);
+}
