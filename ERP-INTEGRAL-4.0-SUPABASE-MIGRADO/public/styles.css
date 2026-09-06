@@ -192,3 +192,14 @@
 .step-observation-compose{display:grid;grid-template-columns:1fr auto;align-items:end;gap:10px;margin-top:12px}
 .step-observation-compose textarea{min-height:86px;resize:vertical}
 @media(max-width:720px){.step-observation-compose{grid-template-columns:1fr}.step-observation-meta{align-items:flex-start;flex-direction:column;gap:3px}}
+
+/* Destaque da conversa atualmente selecionada */
+.collab-conversation.selected,
+.collab-conversation.selected:hover,
+.collab-conversation.selected:focus-visible{
+  background:#14b8a6;
+  border-color:#0f9488;
+  color:#062f2b;
+  box-shadow:0 6px 16px rgba(20,184,166,.24);
+  font-weight:700;
+}
