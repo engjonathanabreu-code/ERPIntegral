@@ -3,10 +3,20 @@
 if (window.ERPProcessosKanban) return;
 
 const STAGES=['Comercial','Coleta Documental','Análise Documental','Topografia','Projetos','Protocolo','Andamento','Concluído'];
+const STAGE_FILTERS=[
+  {id:'todos',label:'Todas as etapas',stages:[]},
+  {id:'comercial',label:'Comercial',stages:['Comercial']},
+  {id:'documental',label:'Documental',stages:['Coleta Documental','Análise Documental']},
+  {id:'topografia',label:'Topografia',stages:['Topografia']},
+  {id:'projetos',label:'Projetos',stages:['Projetos']},
+  {id:'prefeitura',label:'Andamento Prefeitura',stages:['Protocolo']},
+  {id:'registro',label:'Andamento Registro',stages:['Andamento']},
+  {id:'concluido',label:'Concluído',stages:['Concluído']}
+];
 const esc=(v='')=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const brDate=v=>v?new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString('pt-BR'):'—';
 const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-let bridge=null,sb=null,processos=[],andamentos=[],profiles=[],selectedMunicipio='todos',search='',municipioSearch='',loading=false;
+let bridge=null,sb=null,processos=[],andamentos=[],profiles=[],selectedMunicipio='todos',selectedStage='todos',search='',municipioSearch='',loading=false;
 let lastAutoSync=0;
 const openMunicipios=new Set();
 
@@ -65,28 +75,31 @@ async function openModule(){
   }catch(e){content.innerHTML=`<div class="notice danger">Não foi possível carregar os processos: ${esc(e.message||e)}</div>`;}
 }
 
+function matchesStage(p,stageId=selectedStage){const filter=STAGE_FILTERS.find(x=>x.id===stageId);return !filter||!filter.stages.length||filter.stages.includes(p.etapa_atual);}
+function searchedProcesses(){return visibleProcesses().filter(p=>{if(!search)return true;const q=norm(search);return norm(p.nucleo).includes(q)||norm(p.municipio).includes(q)||norm(p.etapa_atual).includes(q)||norm(profileName(p.responsavel_id)).includes(q);});}
 function filtered(){
-  return visibleProcesses().filter(p=>selectedMunicipio==='todos'||p.municipio===selectedMunicipio).filter(p=>{
-    if(!search)return true;const q=norm(search);return norm(p.nucleo).includes(q)||norm(p.municipio).includes(q)||norm(p.etapa_atual).includes(q)||norm(profileName(p.responsavel_id)).includes(q);
-  });
+  return searchedProcesses().filter(p=>matchesStage(p)).filter(p=>selectedMunicipio==='todos'||p.municipio===selectedMunicipio);
 }
 
 function render(){
   const content=getContent();if(!content)return;title('Processos');
-  const allVisible=visibleProcesses(),active=filtered();
+  const allVisible=visibleProcesses(),searched=searchedProcesses(),stageVisible=searched.filter(p=>matchesStage(p)),active=filtered();
   const municipios=[...new Set(allVisible.map(p=>p.municipio))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
   if(selectedMunicipio!=='todos'&&!municipios.includes(selectedMunicipio))selectedMunicipio='todos';
   const counts=Object.fromEntries(STAGES.map(s=>[s,active.filter(p=>p.etapa_atual===s).length]));
+  const stageCounts=Object.fromEntries(STAGE_FILTERS.map(f=>[f.id,f.id==='todos'?searched.length:searched.filter(p=>matchesStage(p,f.id)).length]));
   const delayed=active.filter(hasDelay).length;
   const visibleMunicipios=municipios.filter(m=>!municipioSearch||norm(m).includes(norm(municipioSearch)));const groups=selectedMunicipio==='todos'?visibleMunicipios:visibleMunicipios.filter(m=>m===selectedMunicipio);
   content.innerHTML=`
     <section class="process-toolbar"><div class="process-title-block"><strong>Gestão de Processos</strong><span>Município → Núcleo → Etapa operacional</span></div><div class="process-actions"><input id="processSearch" class="process-search" placeholder="Buscar município, núcleo ou responsável" value="${esc(search)}"><button id="syncCRMProcess" class="btn secondary">Sincronizar CRM</button></div></section>
     <div id="processSyncStatus" class="process-sync-status"></div>
     <section class="process-kpis"><article><span>Processos ativos</span><strong>${active.length}</strong></article><article><span>Municípios</span><strong>${groups.length}</strong></article><article><span>Em andamento externo</span><strong>${counts['Andamento']||0}</strong></article><article class="${delayed?'warn':''}"><span>Prazo vencido</span><strong>${delayed}</strong></article></section>
-    <div class="process-municipio-filter"><button class="${selectedMunicipio==='todos'?'active':''}" data-municipio="todos">Todos <b>${allVisible.length}</b></button>${municipios.map(m=>`<button class="${selectedMunicipio===m?'active':''}" data-municipio="${esc(m)}">${esc(m)} <b>${allVisible.filter(p=>p.municipio===m).length}</b></button>`).join('')}</div>
+    <div class="process-municipio-filter process-stage-filter" aria-label="Filtrar processos por etapa">${STAGE_FILTERS.map(f=>`<button class="${selectedStage===f.id?'active':''}" data-stage-filter="${f.id}">${esc(f.label)} <b>${stageCounts[f.id]||0}</b></button>`).join('')}</div>
+    <div class="process-municipio-filter"><button class="${selectedMunicipio==='todos'?'active':''}" data-municipio="todos">Todos <b>${stageVisible.length}</b></button>${municipios.map(m=>`<button class="${selectedMunicipio===m?'active':''}" data-municipio="${esc(m)}">${esc(m)} <b>${stageVisible.filter(p=>p.municipio===m).length}</b></button>`).join('')}</div>
     <div class="process-groups">${groups.map(m=>municipioSection(m,active.filter(p=>p.municipio===m))).join('')||'<div class="empty">Nenhum processo encontrado.</div>'}</div>`;
   document.querySelector('#processSearch').oninput=e=>{search=e.target.value;clearTimeout(e.target._t);e.target._t=setTimeout(render,180)};
   document.querySelector('#syncCRMProcess').onclick=()=>syncCRM(false);
+  document.querySelectorAll('[data-stage-filter]').forEach(b=>b.onclick=()=>{selectedStage=b.dataset.stageFilter;render()});
   document.querySelectorAll('[data-municipio]').forEach(b=>b.onclick=()=>{selectedMunicipio=b.dataset.municipio;render()});
   document.querySelectorAll('[data-toggle-city]').forEach(b=>b.onclick=e=>{if(e.target.closest('[data-delete-city]'))return;const city=b.dataset.toggleCity;openMunicipios.has(city)?openMunicipios.delete(city):openMunicipios.add(city);render();});
   document.querySelectorAll('[data-delete-city]').forEach(b=>b.onclick=e=>{e.stopPropagation();excludeMunicipio(b.dataset.deleteCity)});
