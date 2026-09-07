@@ -89,7 +89,7 @@ function render(){
   const counts=Object.fromEntries(STAGES.map(s=>[s,active.filter(p=>p.etapa_atual===s).length]));
   const stageCounts=Object.fromEntries(STAGE_FILTERS.map(f=>[f.id,f.id==='todos'?searched.length:searched.filter(p=>matchesStage(p,f.id)).length]));
   const delayed=active.filter(hasDelay).length;
-  const visibleMunicipios=municipios.filter(m=>!municipioSearch||norm(m).includes(norm(municipioSearch)));const groups=selectedMunicipio==='todos'?visibleMunicipios:visibleMunicipios.filter(m=>m===selectedMunicipio);
+  const stageMunicipios=new Set(stageVisible.map(p=>p.municipio));const visibleMunicipios=municipios.filter(m=>stageMunicipios.has(m)&&(!municipioSearch||norm(m).includes(norm(municipioSearch))));const groups=selectedMunicipio==='todos'?visibleMunicipios:visibleMunicipios.filter(m=>m===selectedMunicipio);
   content.innerHTML=`
     <section class="process-toolbar"><div class="process-title-block"><strong>Gestão de Processos</strong><span>Município → Núcleo → Etapa operacional</span></div><div class="process-actions"><input id="processSearch" class="process-search" placeholder="Buscar município, núcleo ou responsável" value="${esc(search)}"><button id="syncCRMProcess" class="btn secondary">Sincronizar CRM</button></div></section>
     <div id="processSyncStatus" class="process-sync-status"></div>
