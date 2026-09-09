@@ -14,7 +14,7 @@
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const isManager = () => {
     const type = window.ERPCoreNavigation?.currentUser?.type || bridge.currentUser?.type || '';
-    return ['Administrador', 'Diretor de Projetos', 'Diretor de Projeto'].includes(type);
+    return ['Administrador', 'Diretor de Projetos', 'Diretor de Projeto', 'Jurídico', 'Juridico'].includes(type);
   };
 
   async function rows(table) {
