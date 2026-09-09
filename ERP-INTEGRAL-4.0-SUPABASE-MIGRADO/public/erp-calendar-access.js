@@ -7,7 +7,7 @@
   const originalFrom = sb.from.bind(sb);
   const isManager = () => {
     const type = window.ERPCoreNavigation?.currentUser?.type || bridge.currentUser?.type || '';
-    return ['Administrador', 'Diretor de Projetos', 'Diretor de Projeto'].includes(type);
+    return ['Administrador', 'Diretor de Projetos', 'Diretor de Projeto', 'Jurídico', 'Juridico'].includes(type);
   };
   const currentUserId = () => window.ERPCoreNavigation?.currentUser?.id || bridge.currentUser?.id || null;
 
