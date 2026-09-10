@@ -829,7 +829,30 @@ function userModal(u={}){
     status.textContent='Salvando...';
     if(u.id){
       const password=String(fd.get('password')||'');
-      if(email!==normEmail(u.email)||password){const {data:{session}}=await sb.auth.getSession();const ar=await fetch('/api/admin-user-password',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session?.access_token||''}`},body:JSON.stringify({userId:u.id,email:email!==normEmail(u.email)?email:undefined,password:password||undefined})});const aj=await ar.json();if(!ar.ok){status.textContent='';alert(`Não foi possível atualizar o acesso: ${aj.error||'erro desconhecido'}`);return;}}
+      if(email!==normEmail(u.email)||password){
+        const button=$('#modalSave');
+        button.disabled=true;
+        try{
+          const {data:{session},error:sessionError}=await sb.auth.getSession();
+          if(sessionError||!session?.access_token)throw new Error('Sua sessão expirou. Entre novamente no ERP.');
+          const ar=await fetch('/api/admin-user-password',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({userId:u.id,email:email!==normEmail(u.email)?email:undefined,password:password||undefined})});
+          const aj=await ar.json().catch(()=>null);
+          const messages={
+            SUPABASE_ADMIN_NOT_CONFIGURED:'A chave administrativa do ERP não está configurada corretamente no servidor. Contate o responsável pelo sistema.',
+            ADMIN_PROFILE_CHECK_FAILED:'Não foi possível verificar a permissão do administrador. Contate o responsável pelo sistema.',
+            UNAUTHORIZED:'Sua sessão expirou. Entre novamente no ERP.',
+            INVALID_SESSION:'Sua sessão expirou. Entre novamente no ERP.',
+            ADMIN_REQUIRED:'Apenas administradores ativos podem alterar o acesso dos usuários.',
+            INVALID_PASSWORD:'A senha precisa ter pelo menos 8 caracteres.'
+          };
+          if(!ar.ok||aj?.ok!==true)throw new Error(messages[aj?.error]||aj?.error||'O servidor não confirmou a alteração. Tente novamente.');
+        }catch(error){
+          status.textContent=`Não foi possível atualizar o acesso: ${error.message||'verifique sua conexão e tente novamente.'}`;
+          return;
+        }finally{
+          button.disabled=false;
+        }
+      }
       const r=await sb.from('profiles').update(profile).eq('id',u.id).select().single();
       if(r.error){status.textContent='';alert(r.error.message);return;}
       Object.assign(u,{name:profile.nome,cpf:profile.cpf||'',email:profile.email,sector:profile.setor,type:profile.tipo,active:profile.ativo});
