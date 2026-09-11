@@ -45,6 +45,7 @@ let metasBoardUser=null;
 let syncTimer=null;
 let syncing=false;
 let pendingSync=false;
+let planStepOrderSave=null;
 let remoteLoaded=false;
 const PROJECT_GROUPS_STORAGE='erp_integral_project_groups_collapsed';
 let collapsedProjectGroups=(()=>{try{return JSON.parse(localStorage.getItem(PROJECT_GROUPS_STORAGE)||'{}')}catch{return {}}})();
@@ -176,6 +177,7 @@ async function deleteMissing(table,ids,extraQuery){
   }
 }
 async function syncRemoteDB(){
+  if(planStepOrderSave)await planStepOrderSave.catch(()=>{});
   if(syncing){pendingSync=true;return;} syncing=true;
   try{
     if(isAdmin()){
@@ -610,7 +612,24 @@ function addStepObservation(pid,sid,text){
   rows.push({id:uid(),text:value,author:currentUser?.name||currentUser?.email||'Usuário',userId:currentUser?.id||null,createdAt:new Date().toISOString()});
   s.notes=encodeStepObservations(rows);saveDB();renderPlans();
 }
+async function savePlanStepOrder(plan,ids){
+  if(!canManageCore()||!remoteLoaded)throw new Error('Sem permissão para reordenar etapas.');
+  if(syncing||planStepOrderSave)throw new Error('Aguarde o salvamento atual e tente novamente.');
+  const previous=plan.steps.map(s=>s.id);
+  if(ids.length!==previous.length||new Set(ids).size!==ids.length||ids.some(id=>!previous.includes(id)))throw new Error('Lista de etapas inválida. Reabra o plano.');
+  if(ids.every((id,i)=>id===previous[i]))return;
+  planStepOrderSave=(async()=>{
+    const {error}=await sb.rpc('reorder_plan_steps',{p_plan_id:plan.id,p_step_ids:ids,p_expected_ids:previous});
+    if(error)throw error;
+    // Keep any local additions/removals queued while the order request was in flight.
+    const currentSteps=plan.steps;
+    plan.steps=ids.map(id=>currentSteps.find(s=>s.id===id)).filter(Boolean).concat(currentSteps.filter(s=>!ids.includes(s.id)));
+    cacheDB();
+  })();
+  try{await planStepOrderSave;}finally{planStepOrderSave=null;}
+}
 function wirePlanEvents(){
+  window.ERPPlanStepOrder?.bind({root:$('#content'),plans:db.plans,allowed:canManageCore(),isBusy:()=>syncing||!!planStepOrderSave,save:savePlanStepOrder});
   $$('[data-edit-plan]').forEach(b=>b.onclick=()=>planModal(db.plans.find(x=>x.id===b.dataset.editPlan)));
   $$('[data-del-plan]').forEach(b=>b.onclick=()=>{if(confirm('Excluir plano?')){const deleted=b.dataset.delPlan;db.plans=db.plans.filter(x=>x.id!==deleted);if(currentPlanDetailId===deleted)currentPlanDetailId=null;saveDB();renderPlans()}});
   $$('[data-add-step]').forEach(b=>b.onclick=()=>stepModal(db.plans.find(x=>x.id===b.dataset.addStep)));
@@ -1142,4 +1161,3 @@ async function render(){
 window.ERPMetasV2={render,refresh:render,historyModal,canCreate:canManageMeta,async createForProcess(id){if(!canManageMeta())return;window.dispatchEvent(new CustomEvent('erp-meta-for-process',{detail:{processId:id}}));await metaModal();const form=qs('#metaV2Form');if(form)form.dataset.processLink=id;},async openDetail(id){document.querySelector('.nav [data-view="metas"]')?.click();await render();metaDetail(id);}};
 window.addEventListener('erp-bridge-ready',()=>{if(B()?.currentView==='metas')render();});
 })();
-
