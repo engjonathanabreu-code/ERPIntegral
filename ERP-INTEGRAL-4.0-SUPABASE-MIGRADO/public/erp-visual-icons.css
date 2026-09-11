@@ -2,7 +2,7 @@
 button[data-erp-ui-icon]{display:inline-flex;align-items:center;justify-content:center;gap:7px}
 button[data-erp-ui-icon]::before{
   content:"";display:inline-block;width:16px;height:16px;flex:0 0 16px;
-  background-color:currentColor;
+  background-color:var(--erp-icon-ink,currentColor);
   -webkit-mask:var(--erp-ui-mask) center / contain no-repeat;
   mask:var(--erp-ui-mask) center / contain no-repeat;pointer-events:none;
 }
@@ -13,13 +13,14 @@ button[data-erp-ui-only]>span{font-size:0!important}
 .plan-card>.plan-head>.actions button[data-erp-ui-only]{gap:6px}
 .erp-legacy-glyph{display:none!important;pointer-events:none}
 .metas-tab[data-erp-ui-icon],[role="tab"][data-erp-ui-icon]{min-width:0}
-[data-erp-stage-icon]::before{
+[data-erp-stage-icon]::before,[data-erp-picked-ui]::before{
   content:"";display:inline-block;vertical-align:middle;width:32px;height:32px;
-  margin-inline-end:8px;margin-block:2px;flex:0 0 32px;border-radius:6px;
-  background-color:#0f5f5b;background-image:var(--erp-stage-image);
-  background-size:var(--erp-stage-size) auto;background-position:var(--erp-stage-position);
-  background-repeat:no-repeat;pointer-events:none;
+  margin-inline-end:8px;margin-block:2px;flex:0 0 32px;border-radius:0;
+  background-color:var(--erp-icon-ink,currentColor);
+  -webkit-mask:var(--erp-stage-mask) center / contain no-repeat;
+  mask:var(--erp-stage-mask) center / contain no-repeat;pointer-events:none;
 }
+[data-erp-picked-ui]::before{-webkit-mask:var(--erp-ui-mask) center / contain no-repeat;mask:var(--erp-ui-mask) center / contain no-repeat}
 .process-column-head{gap:8px}
 .process-column-head>span[data-erp-stage-icon]{min-width:0}
 .process-column-head>b{flex:0 0 auto}
@@ -27,6 +28,27 @@ button[data-erp-ui-only]>span{font-size:0!important}
 .process-stage-filter button[data-erp-stage-icon]::before{margin:0}
 .step-title[data-erp-stage-icon]{overflow-wrap:break-word}
 .project-stage .stage-main strong[data-erp-stage-icon]{overflow-wrap:anywhere}
+.erp-icon-picker{border:0;padding:0;margin:0;min-width:0}
+.erp-icon-picker legend{font-size:12px;font-weight:650;margin-bottom:6px}
+.erp-icon-picker details{border:1px solid var(--line,#d7e2e2);border-radius:6px;min-width:0}
+.erp-icon-picker summary{cursor:pointer;padding:8px 12px;list-style-position:inside}
+[data-erp-icon-current]{display:inline-flex;align-items:center;vertical-align:middle;gap:8px;max-width:calc(100% - 24px);font-size:13px}
+.erp-icon-swatch{display:inline-flex;width:32px;height:32px;flex:0 0 32px;align-items:center;justify-content:center;pointer-events:none}
+.erp-icon-swatch::before{margin:0!important}
+.erp-icon-library{padding:12px;border-top:1px solid var(--line,#d7e2e2);display:grid;gap:12px}
+.erp-icon-library h4{font-size:12px;margin:0 0 8px;letter-spacing:0}
+.erp-icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
+.erp-icon-option{display:flex;align-items:center;justify-content:center;min-width:0;width:100%;height:44px;padding:5px}
+.erp-icon-option,.erp-icon-modes button,.erp-icon-suggestion-button{background:transparent;color:inherit;border:1px solid var(--line,#d7e2e2);border-radius:6px;cursor:pointer}
+.erp-icon-picker button:hover{background:var(--soft,#e6f2f1)}
+.erp-icon-picker button[aria-pressed="true"]{border-color:var(--primary,#0f625d);outline:2px solid var(--primary,#0f625d);outline-offset:-2px}
+.erp-icon-picker button:focus-visible,.erp-icon-picker summary:focus-visible{outline:2px solid var(--primary,#0f625d);outline-offset:2px}
+.erp-icon-modes{display:flex;gap:8px;flex-wrap:wrap}
+.erp-icon-modes button{padding:8px 12px;font-size:12px;min-height:36px}
+.erp-icon-suggestion-button{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;max-width:100%;font-size:13px;text-align:left}
+.erp-icon-picker [hidden]{display:none!important}
+.erp-icon-empty{margin:0;font-size:12px;color:var(--muted)}
+.erp-icon-search{width:100%;min-width:0}
 @media(max-width:760px){
   .nav button[data-erp-ui-icon]{justify-content:center;gap:6px}
   .nav button[data-erp-ui-icon]::before{width:16px;height:16px;flex-basis:16px}

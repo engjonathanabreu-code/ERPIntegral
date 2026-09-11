@@ -1,0 +1,21 @@
+.sidebar-foot.erp-account-footer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 40px;align-items:center;gap:8px;padding-top:10px}
+.erp-account-footer>.user-mini{min-width:0;margin:0;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erp-account-footer>.user-mini strong{overflow:hidden;text-overflow:ellipsis}
+.erp-account-toggle{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;min-width:40px;padding:0;border:1px solid rgba(255,255,255,.22);border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+.erp-account-toggle:hover,.erp-account-toggle[aria-expanded="true"]{background:rgba(255,255,255,.14)}
+.erp-account-toggle:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.erp-account-menu{position:absolute;bottom:calc(100% + 8px);left:0;right:0;z-index:20;padding:6px;background:var(--card,#fff);color:var(--text,#102a2a);border:1px solid var(--line,#d7e2e2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);display:grid;gap:3px}
+.erp-account-menu[hidden]{display:none!important}
+#erpAccountMenu button{display:flex;align-items:center;justify-content:flex-start;width:100%!important;min-height:40px;margin:0;padding:8px 10px!important;border:0;border-radius:4px;background:transparent;color:inherit;font-size:12px!important;opacity:1;text-align:left;white-space:normal}
+#erpAccountMenu button:hover{background:var(--bg,#f4f8f7)}
+#erpAccountMenu #logout{border-top:1px solid var(--line,#d7e2e2);border-radius:0}
+@media(min-width:761px){
+  .erp-account-sidebar>.nav{min-height:0;overflow-y:auto;flex:0 1 auto}
+  .erp-account-sidebar>.nav button{flex:0 0 auto}
+  .erp-account-sidebar>.brand,.erp-account-sidebar>.erp-account-footer{flex-shrink:0}
+}
+@media(max-width:760px){
+  .sidebar-foot.erp-account-footer{display:block!important;flex:0 0 44px;width:44px;max-width:44px}
+  .erp-account-footer>.erp-account-toggle{width:44px!important;height:44px;min-height:44px;padding:0!important}
+  .erp-account-menu{position:fixed;left:auto;right:8px;bottom:calc(68px + env(safe-area-inset-bottom,0px));width:min(252px,calc(100vw - 16px));max-height:calc(100dvh - 100px);overflow-y:auto;z-index:1001}
+}
