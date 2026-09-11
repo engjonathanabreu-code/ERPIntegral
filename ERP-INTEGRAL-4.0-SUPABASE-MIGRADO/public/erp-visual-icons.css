@@ -1,0 +1,36 @@
+/* Decorative layer only: labels, controls, data and event handlers are preserved. */
+button[data-erp-ui-icon]{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+button[data-erp-ui-icon]::before{
+  content:"";display:inline-block;width:16px;height:16px;flex:0 0 16px;
+  background-color:currentColor;
+  -webkit-mask:var(--erp-ui-mask) center / contain no-repeat;
+  mask:var(--erp-ui-mask) center / contain no-repeat;pointer-events:none;
+}
+.nav button[data-erp-ui-icon]{display:flex;justify-content:flex-start;gap:10px}
+.nav button[data-erp-ui-icon]::before{width:18px;height:18px;flex-basis:18px}
+button[data-erp-ui-only]{font-size:0!important;gap:0}
+button[data-erp-ui-only]>span{font-size:0!important}
+.plan-card>.plan-head>.actions button[data-erp-ui-only]{gap:6px}
+.erp-legacy-glyph{display:none!important;pointer-events:none}
+.metas-tab[data-erp-ui-icon],[role="tab"][data-erp-ui-icon]{min-width:0}
+[data-erp-stage-icon]::before{
+  content:"";display:inline-block;vertical-align:middle;width:32px;height:32px;
+  margin-inline-end:8px;margin-block:2px;flex:0 0 32px;border-radius:6px;
+  background-color:#0f5f5b;background-image:var(--erp-stage-image);
+  background-size:var(--erp-stage-size) auto;background-position:var(--erp-stage-position);
+  background-repeat:no-repeat;pointer-events:none;
+}
+.process-column-head{gap:8px}
+.process-column-head>span[data-erp-stage-icon]{min-width:0}
+.process-column-head>b{flex:0 0 auto}
+.process-stage-filter button[data-erp-stage-icon]{display:inline-flex;align-items:center;gap:5px}
+.process-stage-filter button[data-erp-stage-icon]::before{margin:0}
+.step-title[data-erp-stage-icon]{overflow-wrap:break-word}
+.project-stage .stage-main strong[data-erp-stage-icon]{overflow-wrap:anywhere}
+@media(max-width:760px){
+  .nav button[data-erp-ui-icon]{justify-content:center;gap:6px}
+  .nav button[data-erp-ui-icon]::before{width:16px;height:16px;flex-basis:16px}
+  .metas-tabs{flex-wrap:wrap;gap:6px}
+  .metas-tab[data-erp-ui-icon]{white-space:normal;overflow-wrap:anywhere}
+  .modal-foot button[data-erp-ui-icon]{white-space:normal}
+}
